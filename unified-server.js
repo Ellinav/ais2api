@@ -2255,7 +2255,7 @@ class ProxyServerSystem extends EventEmitter {
             </div>
         </div>
         </div> <div class="footer">
-            <p>Powered by Ellin License: CC BY-NC (禁止商业使用)</p>
+            <p>Powered by Ellin. License: CC BY-NC (禁止商业使用)</p>
         </div>
         <script>
         function updateContent() {
