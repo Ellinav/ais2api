@@ -2204,6 +2204,7 @@ class ProxyServerSystem extends EventEmitter {
         .action-group button:hover { opacity: 0.85; }
         .action-group button { background-color: #007bff; color: white; border-color: #007bff; }
         .action-group select { background-color: #ffffff; color: #000000; -webkit-appearance: none; appearance: none; }
+        .footer { text-align: center; margin-top: 25px; padding-bottom: 20px; color: #777; font-size: 0.85em; font-weight: 500; }
         </style>
     </head>
     <body>
@@ -2253,6 +2254,8 @@ class ProxyServerSystem extends EventEmitter {
                 <button onclick="toggleStreamingMode()">切换流模式</button>
             </div>
         </div>
+        </div> <div class="footer">
+            <p>Powered by Ellin. License: CC BY-NC (禁止商业使用)</p>
         </div>
         <script>
         function updateContent() {
@@ -2474,4 +2477,3 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
-
