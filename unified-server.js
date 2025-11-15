@@ -2189,7 +2189,7 @@ class ProxyServerSystem extends EventEmitter {
           const name = isInvalid
             ? "N/A (JSON格式错误)"
             : accountNameMap.get(index) || "N/A (未命名)";
-          return `<span class="label" style="padding-left: 20px;">${index}</span>: ${name}`;
+          return `<span class="label" style="padding-left: 20px;">账号${index}</span>: ${name}`;
         })
         .join("\n");
 
@@ -2276,7 +2276,7 @@ class ProxyServerSystem extends EventEmitter {
             fetch('/api/status').then(response => response.json()).then(data => {
                 const statusPre = document.querySelector('#status-section pre');
                 const accountDetailsHtml = data.status.accountDetails.map(acc => {
-                  return '<span class="label" style="padding-left: 20px;">' + acc.index + '</span>: ' + acc.name;
+                  return '<span class="label" style="padding-left: 20px;">账号' + acc.index + '</span>: ' + acc.name;
                 }).join('\\n');
                 statusPre.innerHTML = 
                     '<span class="label">服务状态</span>: <span class="status-ok">Running</span>\\n' +
