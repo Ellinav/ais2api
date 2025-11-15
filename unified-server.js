@@ -2212,7 +2212,7 @@ class ProxyServerSystem extends EventEmitter {
         #log-container { font-size: 0.9em; max-height: 400px; overflow-y: auto; }
         .status-ok { color: #2ecc71; font-weight: bold; }
         .status-error { color: #e74c3c; font-weight: bold; }
-        .label { display: inline-block; width: 220px; }
+        .label { display: inline-block; width: 220px; box-sizing: border-box; }
         .dot { height: 10px; width: 10px; background-color: #bbb; border-radius: 50%; display: inline-block; margin-left: 10px; animation: blink 1s infinite alternate; }
         @keyframes blink { from { opacity: 0.3; } to { opacity: 1; } }
         .action-group { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; }
