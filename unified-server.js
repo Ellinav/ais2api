@@ -20,6 +20,7 @@ class AuthSource {
     this.authMode = "file";
     this.availableIndices = [];
     this.initialIndices = []; // 新增：用于存储初步发现的所有索引
+    this.accountNameMap = new Map();
 
     if (process.env.AUTH_JSON_1) {
       this.authMode = "env";
@@ -98,8 +99,12 @@ class AuthSource {
       const authContent = this._getAuthContent(index);
       if (authContent) {
         try {
-          JSON.parse(authContent);
+          const authData = JSON.parse(authContent);
           validIndices.push(index);
+          this.accountNameMap.set(
+            index,
+            authData.accountName || "N/A (未命名)"
+          );
         } catch (e) {
           invalidSourceDescriptions.push(`auth-${index}`);
         }
@@ -2177,6 +2182,17 @@ class ProxyServerSystem extends EventEmitter {
       );
       const logs = this.logger.logBuffer || [];
 
+      const accountNameMap = authSource.accountNameMap;
+      const accountDetailsHtml = initialIndices
+        .map((index) => {
+          const isInvalid = invalidIndices.includes(index);
+          const name = isInvalid
+            ? "N/A (JSON格式错误)"
+            : accountNameMap.get(index) || "N/A (未命名)";
+          return `<span class="label" style="padding-left: 20px;">${index}</span>: ${name}`;
+        })
+        .join("\n");
+
       const accountOptionsHtml = availableIndices
         .map((index) => `<option value="${index}">账号 #${index}</option>`)
         .join("");
@@ -2204,7 +2220,6 @@ class ProxyServerSystem extends EventEmitter {
         .action-group button:hover { opacity: 0.85; }
         .action-group button { background-color: #007bff; color: white; border-color: #007bff; }
         .action-group select { background-color: #ffffff; color: #000000; -webkit-appearance: none; appearance: none; }
-        .footer { text-align: center; margin-top: 25px; padding-bottom: 20px; color: #777; font-size: 0.85em; font-weight: 500; }
         </style>
     </head>
     <body>
@@ -2237,6 +2252,7 @@ class ProxyServerSystem extends EventEmitter {
 <span class="label">扫描到的总帐号</span>: [${initialIndices.join(
         ", "
       )}] (总数: ${initialIndices.length})
+      ${accountDetailsHtml}
 <span class="label">格式错误 (已忽略)</span>: [${invalidIndices.join(
         ", "
       )}] (总数: ${invalidIndices.length})
@@ -2254,26 +2270,28 @@ class ProxyServerSystem extends EventEmitter {
                 <button onclick="toggleStreamingMode()">切换流模式</button>
             </div>
         </div>
-        </div> <div class="footer">
-            <p>Powered by Ellin. License: CC BY-NC (禁止商业使用)</p>
         </div>
         <script>
         function updateContent() {
             fetch('/api/status').then(response => response.json()).then(data => {
                 const statusPre = document.querySelector('#status-section pre');
-                statusPre.innerHTML = \`
-<span class="label">服务状态</span>: <span class="status-ok">Running</span>
-<span class="label">浏览器连接</span>: <span class="\${data.status.browserConnected ? "status-ok" : "status-error"}">\${data.status.browserConnected}</span>
---- 服务配置 ---
-<span class="label">流模式</span>: \${data.status.streamingMode}
-<span class="label">立即切换 (状态码)</span>: \${data.status.immediateSwitchStatusCodes}
-<span class="label">API 密钥</span>: \${data.status.apiKeySource}
---- 账号状态 ---
-<span class="label">当前使用账号</span>: #\${data.status.currentAuthIndex}
-<span class="label">使用次数计数</span>: \${data.status.usageCount}
-<span class="label">连续失败计数</span>: \${data.status.failureCount}
-<span class="label">扫描到的总账号</span>: \${data.status.initialIndices}
-<span class="label">格式错误 (已忽略)</span>: \${data.status.invalidIndices}\`;
+                const accountDetailsHtml = data.status.accountDetails.map(acc => {
+                  return '<span class="label" style="padding-left: 20px;">' + acc.index + '</span>: ' + acc.name;
+                }).join('\\n');
+                statusPre.innerHTML = 
+                    '<span class="label">服务状态</span>: <span class="status-ok">Running</span>\\n' +
+                    '<span class="label">浏览器连接</span>: <span class="' + (data.status.browserConnected ? "status-ok" : "status-error") + '">' + data.status.browserConnected + '</span>\\n' +
+                    '--- 服务配置 ---\\n' +
+                    '<span class="label">流模式</span>: ' + data.status.streamingMode + '\\n' +
+                    '<span class="label">立即切换 (状态码)</span>: ' + data.status.immediateSwitchStatusCodes + '\\n' +
+                    '<span class="label">API 密钥</span>: ' + data.status.apiKeySource + '\\n' +
+                    '--- 账号状态 ---\\n' +
+                    '<span class="label">当前使用账号</span>: #' + data.status.currentAuthIndex + '\\n' +
+                    '<span class="label">使用次数计数</span>: ' + data.status.usageCount + '\\n' +
+                    '<span class="label">连续失败计数</span>: ' + data.status.failureCount + '\\n' +
+                    '<span class="label">扫描到的总账号</span>: ' + data.status.initialIndices + '\\n' +
+                    accountDetailsHtml + '\\n' +
+                    '<span class="label">格式错误 (已忽略)</span>: ' + data.status.invalidIndices;
                 
                 const logContainer = document.getElementById('log-container');
                 const logTitle = document.querySelector('#log-section h2');
@@ -2335,6 +2353,15 @@ class ProxyServerSystem extends EventEmitter {
         (i) => !authSource.availableIndices.includes(i)
       );
       const logs = this.logger.logBuffer || [];
+      const accountNameMap = authSource.accountNameMap;
+      const accountDetails = initialIndices.map((index) => {
+        const isInvalid = invalidIndices.includes(index);
+        const name = isInvalid
+          ? "N/A (JSON格式错误)"
+          : accountNameMap.get(index) || "N/A (未命名)";
+        return { index, name };
+      });
+
       const data = {
         status: {
           streamingMode: `${this.streamingMode} (仅启用流式传输时生效)`,
@@ -2354,6 +2381,7 @@ class ProxyServerSystem extends EventEmitter {
           initialIndices: `[${initialIndices.join(", ")}] (总数: ${
             initialIndices.length
           })`,
+          accountDetails: accountDetails,
           invalidIndices: `[${invalidIndices.join(", ")}] (总数: ${
             invalidIndices.length
           })`,
