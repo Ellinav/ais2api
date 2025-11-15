@@ -2220,6 +2220,35 @@ class ProxyServerSystem extends EventEmitter {
         .action-group button:hover { opacity: 0.85; }
         .action-group button { background-color: #007bff; color: white; border-color: #007bff; }
         .action-group select { background-color: #ffffff; color: #000000; -webkit-appearance: none; appearance: none; }
+        @media (max-width: 600px) {
+            body { 
+                padding: 0.5em; /* 减小页面整体的边距 */
+            }
+            .container {
+                /* 关键：减小白色卡片的左右内边距，让它更宽 */
+                padding: 1em; 
+                margin: 0;
+            }
+            pre {
+                /* 关键：减小黑色代码框的内边距 */
+                padding: 1em;
+                font-size: 0.9em; /* 让字体稍微小一点，容纳更多内容 */
+            }
+            .label {
+                /* 关键：移除固定的 220px 宽度，让标签宽度自动适应 */
+                width: auto; 
+                /* 并且，我们不再需要它是一个'块'，让它和文本流在一起 */
+                display: inline;
+            }
+            .action-group {
+                flex-direction: column; /* 让操作按钮垂直堆叠 */
+                align-items: stretch; /* 让按钮占满宽度 */
+            }
+            .action-group select, .action-group button {
+                width: 100%;
+                box-sizing: border-box; 
+            }
+        }
         </style>
     </head>
     <body>
