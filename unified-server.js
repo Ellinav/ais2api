@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { firefox } = require("playwright");
 const os = require("os");
- 
+
 // ===================================================================================
 // AUTH SOURCE MANAGEMENT MODULE
 // ===================================================================================
@@ -2085,14 +2085,9 @@ class ProxyServerSystem extends EventEmitter {
     const app = this._createExpressApp();
     this.httpServer = http.createServer(app);
 
-    // <<<--- 关键新增：在这里设置服务器的超时策略 --->>>
-    // 设置Keep-Alive超时为30秒。
-    // Node.js会主动在连接空闲30秒后发送关闭信号。
-    this.httpServer.keepAliveTimeout = 15000;
-
-    // 设置请求头超时为35秒。
-    // 确保在Keep-Alive超时后，服务器有足够的时间来处理关闭前的最后一个请求头。
-    this.httpServer.headersTimeout = 20000;
+    this.httpServer.keepAliveTimeout = 120000;
+    this.httpServer.headersTimeout = 125000;
+    this.httpServer.requestTimeout = 120000;
 
     return new Promise((resolve) => {
       this.httpServer.listen(this.config.httpPort, this.config.host, () => {
@@ -2360,7 +2355,14 @@ class ProxyServerSystem extends EventEmitter {
                     body: JSON.stringify({ targetIndex: parseInt(targetIndex, 10) })
             })
             .then(res => res.text()).then(data => { alert(data); updateContent(); })
-            .catch(err => { alert('操作失败: ' + err); updateContent(); });
+            .catch(err => { 
+                if (err.message.includes('Load failed') || err.message.includes('NetworkError')) {
+                    alert('⚠️ 浏览器启动较慢，操作仍在后台进行中。\n\n请不要重复点击。');
+                } else {
+                    alert('❌ 操作失败: ' + err); 
+                }
+                updateContent(); 
+            });
         }
 
         function toggleStreamingMode() { 
@@ -2551,4 +2553,3 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
-
