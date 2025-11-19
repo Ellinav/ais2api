@@ -989,6 +989,17 @@ class RequestHandler {
     const isOpenAIStream = req.body.stream === true;
     const model = req.body.model || "gemini-1.5-pro-latest";
 
+    if (this.config.switchOnUses > 0) {
+      this.usageCount++;
+      this.logger.info(
+        `[Request] OpenAI生成请求 - 账号轮换计数: ${this.usageCount}/${this.config.switchOnUses} (当前账号: ${this.currentAuthIndex})`
+      );
+      if (this.usageCount >= this.config.switchOnUses) {
+        // 对于 OpenAI 请求，也标记为请求后需要切换
+        this.needsSwitchingAfterRequest = true;
+      }
+    }
+
     // 1. 翻译请求体 (逻辑保持不变)
     let googleBody;
     try {
@@ -1172,6 +1183,15 @@ class RequestHandler {
       this._handleRequestError(error, res);
     } finally {
       this.connectionRegistry.removeMessageQueue(requestId);
+      if (this.needsSwitchingAfterRequest) {
+        this.logger.info(
+          `[Auth] OpenAI轮换计数已达到切换阈值 (${this.usageCount}/${this.config.switchOnUses})，将在后台自动切换账号...`
+        );
+        this._switchToNextAuth().catch((err) => {
+          this.logger.error(`[Auth] 后台账号切换任务失败: ${err.message}`);
+        });
+        this.needsSwitchingAfterRequest = false;
+      }
       if (!res.writableEnded) {
         res.end();
       }
@@ -2343,7 +2363,7 @@ class ProxyServerSystem extends EventEmitter {
             }).catch(error => console.error('Error fetching new content:', error));
         }
 
-        function switchSpecificAccount() {
+       function switchSpecificAccount() {
             const selectElement = document.getElementById('accountIndexSelect');
             const targetIndex = selectElement.value;
             if (!confirm(\`确定要切换到账号 #\${targetIndex} 吗？这会重置浏览器会话。\`)) {
@@ -2365,7 +2385,7 @@ class ProxyServerSystem extends EventEmitter {
             });
         }
 
-        function toggleStreamingMode() { 
+       function toggleStreamingMode() { 
             const newMode = prompt('请输入新的流模式 (real 或 fake):', '${
               this.config.streamingMode
             }');
@@ -2389,6 +2409,7 @@ class ProxyServerSystem extends EventEmitter {
         </script>
     </body>
     </html>
+
     `;
       res.status(200).send(statusHtml);
     });
