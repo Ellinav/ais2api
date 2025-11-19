@@ -19,7 +19,7 @@ class AuthSource {
     this.logger = logger;
     this.authMode = "file";
     this.availableIndices = [];
-    this.initialIndices = []; // 新增：用于存储初步发现的所有索引
+    this.initialIndices = [];
     this.accountNameMap = new Map();
 
     if (process.env.AUTH_JSON_1) {
@@ -2552,3 +2552,4 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
+
