@@ -709,12 +709,14 @@ class RequestHandler {
   }
 
   async _switchToNextAuth() {
-    if (this.authSource.availableIndices.length <= 1) {
-      this.logger.warn("[Auth] 😕 检测到只有一个可用账号，拒绝切换操作。");
-      throw new Error("Only one account is available, cannot switch.");
+    const available = this.authSource.availableIndices;
+
+    if (available.length === 0) {
+      throw new Error("没有可用的认证源，无法切换。");
     }
+
     if (this.isAuthSwitching) {
-      this.logger.info("🔄 [Auth] 正在切换账号，跳过重复操作");
+      this.logger.info("🔄 [Auth] 正在切换/重启账号，跳过重复操作");
       return { success: false, reason: "Switch already in progress." };
     }
 
@@ -723,11 +725,41 @@ class RequestHandler {
     this.isAuthSwitching = true;
 
     try {
+      // 单账号模式 - 执行原地重启 (Refresh)
+      if (available.length === 1) {
+        const singleIndex = available[0];
+        this.logger.info("==================================================");
+        this.logger.info(
+          `🔄 [Auth] 单账号模式：达到轮换阈值，正在执行原地重启...`
+        );
+        this.logger.info(`   • 目标账号: #${singleIndex}`);
+        this.logger.info("==================================================");
+
+        try {
+          // 强制重新加载当前账号的 Context
+          await this.browserManager.launchOrSwitchContext(singleIndex);
+
+          // 关键：重置计数器
+          this.failureCount = 0;
+          this.usageCount = 0;
+
+          this.logger.info(
+            `✅ [Auth] 单账号 #${singleIndex} 重启/刷新成功，使用计数已清零。`
+          );
+          return { success: true, newIndex: singleIndex };
+        } catch (error) {
+          this.logger.error(`❌ [Auth] 单账号重启失败: ${error.message}`);
+          throw error;
+        }
+      }
+
+      // 多账号模式 - 执行轮换 (Rotate)
+
       const previousAuthIndex = this.currentAuthIndex;
       const nextAuthIndex = this._getNextAuthIndex();
 
       this.logger.info("==================================================");
-      this.logger.info(`🔄 [Auth] 开始账号切换流程`);
+      this.logger.info(`🔄 [Auth] 多账号模式：开始账号切换流程`);
       this.logger.info(`   • 当前账号: #${previousAuthIndex}`);
       this.logger.info(`   • 目标账号: #${nextAuthIndex}`);
       this.logger.info("==================================================");
@@ -766,7 +798,6 @@ class RequestHandler {
         }
       }
     } finally {
-      // --- 解锁！---
       this.isAuthSwitching = false;
       this.isSystemBusy = false;
     }
@@ -2392,7 +2423,6 @@ class ProxyServerSystem extends EventEmitter {
       res.status(200).send(statusHtml);
     });
 
-    // API 路由和代理主逻辑保持不变...
     app.get("/api/status", isAuthenticated, (req, res) => {
       const { config, requestHandler, authSource, browserManager } = this;
       const initialIndices = authSource.initialIndices || [];
@@ -2552,4 +2582,3 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
-
