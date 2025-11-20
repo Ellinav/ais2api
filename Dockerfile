@@ -54,15 +54,29 @@ RUN set -eux; \
     [ -f camoufox.zip ] || (echo "!!! 文件不存在" >&2 && exit 1) && \
     [ -s camoufox.zip ] || (echo "!!! 文件为空" >&2 && exit 1) && \
     \
-    echo ">>> 解压 Camoufox..." && \
-    unzip -q camoufox.zip || (echo "!!! 解压失败" >&2 && exit 1) && \
+    echo ">>> 检查文件类型..." && \
+    file camoufox.zip && \
+    echo ">>> ZIP 文件详细信息:" && \
+    ls -la camoufox.zip && \
+    echo ">>> ZIP 文件完整性测试..." && \
+    unzip -t camoufox.zip || (echo "!!! ZIP 文件损坏" >&2 && exit 1) && \
+    echo ">>> 查看 ZIP 内容列表..." && \
+    unzip -l camoufox.zip && \
+    echo ">>> 检查是否有特殊字符文件名..." && \
+    unzip -l camoufox.zip | grep -E '[^[:print:][:space:]]' || echo "未发现非打印字符" && \
+    echo ">>> 尝试详细解压并显示每个文件..." && \
+    unzip -v camoufox.zip && \
+    echo ">>> 开始解压 Camoufox..." && \
+    unzip -o camoufox.zip 2>&1 | tee unzip.log || (echo "!!! 解压失败，显示详细信息:" >&2 && cat unzip.log && ls -la && file camoufox.zip && exit 1) && \
+    echo ">>> 解压完成，检查解压日志..." && \
+    [ -f unzip.log ] && cat unzip.log || echo "无解压日志文件" && \
     \
     echo ">>> 当前目录内容:" && \
     ls -lah && \
     \
-    echo ">>> 查找 camoufox-bin 可执行文件..." && \
-    CAMOUFOX_BIN=$(find . -name "camoufox-bin" -type f | head -n 1) && \
-    [ -n "${CAMOUFOX_BIN}" ] || (echo "!!! 未找到 camoufox-bin" >&2 && exit 1) && \
+    echo ">>> 查找 camoufox 可执行文件..." && \
+    CAMOUFOX_BIN=$(find . -name "camoufox" -type f | head -n 1) && \
+    [ -n "${CAMOUFOX_BIN}" ] || (echo "!!! 未找到 camoufox" >&2 && exit 1) && \
     echo ">>> 找到: ${CAMOUFOX_BIN}" && \
     \
     echo ">>> 整理目录结构..." && \
@@ -71,7 +85,7 @@ RUN set -eux; \
     cp -r "${CAMOUFOX_DIR}"/* camoufox/ && \
     \
     echo ">>> 设置可执行权限..." && \
-    chmod +x camoufox/camoufox-bin && \
+    chmod +x camoufox/camoufox && \
     \
     echo ">>> 清理临时文件..." && \
     rm -rf camoufox.zip camoufox-* camoufox_* && \
@@ -97,7 +111,7 @@ EXPOSE 7860
 EXPOSE 9998
 
 # 设置环境变量
-ENV CAMOUFOX_EXECUTABLE_PATH=/app/camoufox/camoufox-bin
+ENV CAMOUFOX_EXECUTABLE_PATH=/app/camoufox/camoufox
 
 # 定义容器启动命令
 CMD ["node", "unified-server.js"]
