@@ -11,9 +11,6 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 libxss1 libxtst6 xvfb \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装qemu-user-static用于多架构支持（仅在构建时需要）
-RUN apt-get update && apt-get install -y qemu-user-static && rm -rf /var/lib/apt/lists/*
-
 # 2. [保持不变] 拷贝 package.json 并安装依赖。
 # 只要你的npm包不变化，这一层就会被缓存。
 COPY package*.json ./
