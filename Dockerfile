@@ -26,20 +26,21 @@ ARG CAMOUFOX_ARM64_URL
 ARG CAMOUFOX_VERSION
 ARG TARGETPLATFORM
 
-RUN \
+RUN set -eux; \
     if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
         echo "下载AMD64版本Camoufox..." && \
-        curl -sSL ${CAMOUFOX_AMD64_URL} -o camoufox.zip; \
+        curl -sSL "${CAMOUFOX_AMD64_URL}" -o camoufox.zip; \
     elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
         echo "下载ARM64版本Camoufox..." && \
-        curl -sSL ${CAMOUFOX_ARM64_URL} -o camoufox.zip; \
+        curl -sSL "${CAMOUFOX_ARM64_URL}" -o camoufox.zip; \
     else \
         echo "不支持的架构: $TARGETPLATFORM" && exit 1; \
-    fi && \
-    unzip camoufox.zip && \
-    rm camoufox.zip && \
-    mv camoufox-* camoufox && \
-    chmod +x /app/camoufox/camoufox
+    fi; \
+    mkdir -p camoufox; \
+    unzip camoufox.zip -d camoufox; \
+    rm camoufox.zip; \
+    chmod +x camoufox/camoufox
+
 
 # 4. 【核心优化】现在，才拷贝你经常变动的代码文件。
 # 这一步放在后面，确保你修改代码时，前面所有重量级的层都能利用缓存。
