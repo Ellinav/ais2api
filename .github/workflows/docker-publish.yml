@@ -38,6 +38,8 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
 
       - name: Build and push Docker image
         id: build-and-push
@@ -46,6 +48,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          # 支持多架构构建
+          platforms: linux/amd64,linux/arm64
           # 核心修改：根据您输入的版本号来生成标签
           # 格式是：ellinalopez/cloud-studio:v1.0-testing
           tags: ellinalopez/cloud-studio:${{ github.event.inputs.version }}
@@ -59,6 +63,7 @@ jobs:
         # 使用 if 条件判断是否运行此步骤
         if: github.event.inputs.update_latest == true
         run: |
-          IMAGE_ID=$(docker inspect --format='{{.Id}}' ellinalopez/cloud-studio:${{ github.event.inputs.version }})
-          docker tag $IMAGE_ID ellinalopez/cloud-studio:latest
-          docker push ellinalopez/cloud-studio:latest
+          # 为多架构镜像创建latest标签
+          docker buildx imagetools create \
+            ellinalopez/cloud-studio:${{ github.event.inputs.version }} \
+            --tag ellinalopez/cloud-studio:latest
