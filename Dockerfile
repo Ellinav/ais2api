@@ -20,13 +20,26 @@ COPY package*.json ./
 RUN npm install --production
 
 # 3. 【核心优化】将浏览器下载和解压作为独立的一层。
-# 只要CAMOUFOX_URL不变，这一层就会被缓存。这层体积最大，缓存命中至关重要。
-ARG CAMOUFOX_URL
+# 根据目标架构下载对应的Camoufox版本
+ARG CAMOUFOX_AMD64_URL
+ARG CAMOUFOX_ARM64_URL
+ARG CAMOUFOX_VERSION
 ARG TARGETPLATFORM
-RUN curl -sSL ${CAMOUFOX_URL} -o camoufox-linux.tar.gz && \
-    tar -xzf camoufox-linux.tar.gz && \
-    rm camoufox-linux.tar.gz && \
-    chmod +x /app/camoufox-linux/camoufox
+
+RUN \
+    if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+        echo "下载AMD64版本Camoufox..." && \
+        curl -sSL ${CAMOUFOX_AMD64_URL} -o camoufox.zip; \
+    elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        echo "下载ARM64版本Camoufox..." && \
+        curl -sSL ${CAMOUFOX_ARM64_URL} -o camoufox.zip; \
+    else \
+        echo "不支持的架构: $TARGETPLATFORM" && exit 1; \
+    fi && \
+    unzip camoufox.zip && \
+    rm camoufox.zip && \
+    mv camoufox-* camoufox && \
+    chmod +x /app/camoufox/camoufox
 
 # 4. 【核心优化】现在，才拷贝你经常变动的代码文件。
 # 这一步放在后面，确保你修改代码时，前面所有重量级的层都能利用缓存。
@@ -44,7 +57,7 @@ EXPOSE 7860
 EXPOSE 9998
 
 # 设置环境变量
-ENV CAMOUFOX_EXECUTABLE_PATH=/app/camoufox-linux/camoufox
+ENV CAMOUFOX_EXECUTABLE_PATH=/app/camoufox/camoufox
 
 # 定义容器启动命令
 CMD ["node", "unified-server.js"]

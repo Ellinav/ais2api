@@ -24,11 +24,24 @@ jobs:
         # 需要获取你手动运行时所在的分支（通常是main）
         uses: actions/checkout@v4
 
-      - name: Get Camoufox Download URL
-        id: get_camoufox_url
+      - name: Get Camoufox Download URLs
+        id: get_camoufox_urls
         run: |
-          URL=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | grep "browser_download_url.*camoufox-linux.tar.gz" | cut -d : -f 2,3 | tr -d '", ')
-          echo "CAMOUFOX_URL=$URL" >> $GITHUB_ENV
+          # 获取最新版本号
+          LATEST_VERSION=$(curl -s "https://api.github.com/repos/daijro/camoufox/releases/latest" | grep '"tag_name"' | cut -d : -f 2,3 | tr -d '", ')
+          echo "LATEST_VERSION=$LATEST_VERSION" >> $GITHUB_ENV
+          
+          # 获取amd64版本下载URL
+          AMD64_URL=$(curl -s "https://api.github.com/repos/daijro/camoufox/releases/latest" | grep "browser_download_url.*lin.x86_64.zip" | cut -d : -f 2,3 | tr -d '", ')
+          echo "CAMOUFOX_AMD64_URL=$AMD64_URL" >> $GITHUB_ENV
+          
+          # 获取arm64版本下载URL
+          ARM64_URL=$(curl -s "https://api.github.com/repos/daijro/camoufox/releases/latest" | grep "browser_download_url.*lin.arm64.zip" | cut -d : -f 2,3 | tr -d '", ')
+          echo "CAMOUFOX_ARM64_URL=$ARM64_URL" >> $GITHUB_ENV
+          
+          echo "版本: $LATEST_VERSION"
+          echo "AMD64 URL: $AMD64_URL"
+          echo "ARM64 URL: $ARM64_URL"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -54,7 +67,9 @@ jobs:
           # 格式是：ellinalopez/cloud-studio:v1.0-testing
           tags: ellinalopez/cloud-studio:${{ github.event.inputs.version }}
           build-args: |
-            CAMOUFOX_URL=${{ env.CAMOUFOX_URL }}
+            CAMOUFOX_AMD64_URL=${{ env.CAMOUFOX_AMD64_URL }}
+            CAMOUFOX_ARM64_URL=${{ env.CAMOUFOX_ARM64_URL }}
+            CAMOUFOX_VERSION=${{ env.LATEST_VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
