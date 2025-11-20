@@ -79,19 +79,14 @@ RUN set -eux; \
     [ -n "${CAMOUFOX_BIN}" ] || (echo "!!! 未找到 camoufox" >&2 && exit 1) && \
     echo ">>> 找到: ${CAMOUFOX_BIN}" && \
     \
-    echo ">>> 整理目录结构..." && \
-    mkdir -p camoufox && \
-    CAMOUFOX_DIR=$(dirname "${CAMOUFOX_BIN}") && \
-    cp -r "${CAMOUFOX_DIR}"/* camoufox/ && \
-    \
     echo ">>> 设置可执行权限..." && \
-    chmod +x camoufox/camoufox && \
+    chmod +x "${CAMOUFOX_BIN}" && \
     \
     echo ">>> 清理临时文件..." && \
-    rm -rf camoufox.zip camoufox-* camoufox_* && \
+    rm -rf camoufox.zip && \
     \
     echo ">>> 最终目录结构:" && \
-    ls -lah camoufox/ && \
+    ls -lah . && \
     \
     echo ">>> ✓ Camoufox 安装完成 (${TARGETPLATFORM})"
 
@@ -111,7 +106,7 @@ EXPOSE 7860
 EXPOSE 9998
 
 # 设置环境变量
-ENV CAMOUFOX_EXECUTABLE_PATH=/app/camoufox/camoufox
+ENV CAMOUFOX_EXECUTABLE_PATH=/app/camoufox
 
 # 定义容器启动命令
 CMD ["node", "unified-server.js"]
