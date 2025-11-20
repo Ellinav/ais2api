@@ -1013,12 +1013,12 @@ class RequestHandler {
     }
   }
 
-  // unified-server.js 文件内，RequestHandler 类中的 processOpenAIRequest 函数
-
   async processOpenAIRequest(req, res) {
     const requestId = this._generateRequestId();
     const isOpenAIStream = req.body.stream === true;
     const model = req.body.model || "gemini-1.5-pro-latest";
+    const systemStreamMode = this.serverSystem.streamingMode;
+    const useRealStream = isOpenAIStream && systemStreamMode === "real";
 
     if (this.config.switchOnUses > 0) {
       this.usageCount++;
@@ -1026,12 +1026,10 @@ class RequestHandler {
         `[Request] OpenAI生成请求 - 账号轮换计数: ${this.usageCount}/${this.config.switchOnUses} (当前账号: ${this.currentAuthIndex})`
       );
       if (this.usageCount >= this.config.switchOnUses) {
-        // 对于 OpenAI 请求，也标记为请求后需要切换
         this.needsSwitchingAfterRequest = true;
       }
     }
 
-    // 1. 翻译请求体 (逻辑保持不变)
     let googleBody;
     try {
       googleBody = this._translateOpenAIToGoogle(req.body, model);
@@ -1044,60 +1042,46 @@ class RequestHandler {
       );
     }
 
-    // 2. 构建代理请求 (逻辑保持不变)
-    const googleEndpoint = isOpenAIStream
+    const googleEndpoint = useRealStream
       ? "streamGenerateContent"
       : "generateContent";
     const proxyRequest = {
       path: `/v1beta/models/${model}:${googleEndpoint}`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      query_params: isOpenAIStream ? { alt: "sse" } : {},
+      query_params: useRealStream ? { alt: "sse" } : {},
       body: JSON.stringify(googleBody),
       request_id: requestId,
-      // [关键修改] 明确标记这是一个生成式请求，以便切换逻辑可以正确重置失败计数
       is_generative: true,
-      streaming_mode: "real",
-      client_wants_stream: true,
+      streaming_mode: useRealStream ? "real" : "fake",
     };
 
     const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
 
     try {
-      // [新增-步骤1] 统一发送请求并等待初始响应
       this._forwardRequest(proxyRequest);
-      const initialMessage = await messageQueue.dequeue(); // 等待第一个消息，可能是headers或error
+      const initialMessage = await messageQueue.dequeue();
 
-      // [新增-步骤2] 检查初始响应是否为错误
       if (initialMessage.event_type === "error") {
-        // 如果是错误，则触发失败处理和账户切换逻辑
         this.logger.error(
           `[Adapter] 收到来自浏览器的错误，将触发切换逻辑。状态码: ${initialMessage.status}, 消息: ${initialMessage.message}`
         );
-
-        // 调用现有的切换逻辑
         await this._handleRequestFailureAndSwitch(initialMessage, res);
-
-        // 根据请求是流式还是非流式，以合适的方式结束响应
         if (isOpenAIStream) {
-          // 对于流式请求，在发送完错误块后（由_handleRequestFailureAndSwitch内部完成），
-          // 发送一个 [DONE] 信号并结束响应，是符合OpenAI规范的健壮做法。
           if (!res.writableEnded) {
             res.write("data: [DONE]\n\n");
             res.end();
           }
         } else {
-          // 对于非流式请求，直接发送一个标准的JSON错误响应
           this._sendErrorResponse(
             res,
             initialMessage.status || 500,
             initialMessage.message
           );
         }
-        return; // 处理完毕，提前退出函数
+        return;
       }
 
-      // [新增-步骤3] 如果初始响应不是错误，则说明请求成功，重置失败计数
       if (this.failureCount > 0) {
         this.logger.info(
           `✅ [Auth] OpenAI接口请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`
@@ -1105,55 +1089,56 @@ class RequestHandler {
         this.failureCount = 0;
       }
 
-      // [逻辑微调] 将原有代码放入 else 块中，并根据流式/非流式分别处理
       if (isOpenAIStream) {
-        // --- 处理流式响应 ---
         res.status(200).set({
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
         });
 
-        // initialMessage 是 headers，在OpenAI适配器中我们不需要它，所以直接开始循环处理后续的 chunk
-        let lastGoogleChunk = "";
-        while (true) {
-          const message = await messageQueue.dequeue(300000); // 5分钟超时
-          if (message.type === "STREAM_END") {
-            res.write("data: [DONE]\n\n");
-            break;
-          }
-          if (message.data) {
-            const translatedChunk = this._translateGoogleToOpenAIStream(
-              message.data,
-              model
-            );
-            if (translatedChunk) {
-              res.write(translatedChunk);
+        if (useRealStream) {
+          this.logger.info(`[Adapter] OpenAI 流式响应 (Real Mode) 已启动...`);
+          let lastGoogleChunk = "";
+          while (true) {
+            const message = await messageQueue.dequeue(300000);
+            if (message.type === "STREAM_END") {
+              res.write("data: [DONE]\n\n");
+              break;
             }
-            lastGoogleChunk = message.data; // [修正] 总是记录最后一个数据块
-          }
-        }
-
-        // 记录结束原因
-        try {
-          if (lastGoogleChunk.startsWith("data: ")) {
-            const jsonString = lastGoogleChunk.substring(6).trim();
-            if (jsonString) {
-              const lastResponse = JSON.parse(jsonString);
-              const finishReason =
-                lastResponse.candidates?.[0]?.finishReason || "UNKNOWN";
-              this.logger.info(
-                `✅ [Request] OpenAI流式响应结束，原因: ${finishReason}，请求ID: ${requestId}`
+            if (message.data) {
+              const translatedChunk = this._translateGoogleToOpenAIStream(
+                message.data,
+                model
               );
+              if (translatedChunk) {
+                res.write(translatedChunk);
+              }
+              lastGoogleChunk = message.data;
             }
           }
-        } catch (e) {
-          // 解析失败则不记录
+        } else {
+          this.logger.info(`[Adapter] OpenAI 流式响应 (Fake Mode) 已启动...`);
+
+          let fullBody = "";
+          while (true) {
+            const message = await messageQueue.dequeue(300000);
+            if (message.type === "STREAM_END") break;
+            if (message.data) fullBody += message.data;
+          }
+
+          const translatedChunk = this._translateGoogleToOpenAIStream(
+            fullBody,
+            model
+          );
+          if (translatedChunk) {
+            res.write(translatedChunk);
+          }
+          res.write("data: [DONE]\n\n");
+          this.logger.info(
+            `[Adapter] Fake模式：已一次性发送完整内容并结束流。`
+          );
         }
       } else {
-        // --- 处理非流式响应 ---
-        // initialMessage 是 headers，同样不需要。现在等待body。
-        // [修正] 非流式响应也可能被分块，需要循环接收直到结束
         let fullBody = "";
         while (true) {
           const message = await messageQueue.dequeue(300000);
@@ -1168,7 +1153,6 @@ class RequestHandler {
         const googleResponse = JSON.parse(fullBody);
         const candidate = googleResponse.candidates?.[0];
 
-        // 后续的翻译逻辑保持不变...
         let responseContent = "";
         if (
           candidate &&
@@ -1210,7 +1194,6 @@ class RequestHandler {
         res.status(200).json(openaiResponse);
       }
     } catch (error) {
-      // 这个 catch 块主要处理超时等意外情况
       this._handleRequestError(error, res);
     } finally {
       this.connectionRegistry.removeMessageQueue(requestId);
