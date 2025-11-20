@@ -18,25 +18,68 @@ RUN npm install --production
 
 # 3. 【核心优化】将浏览器下载和解压作为独立的一层。
 # 根据目标架构下载对应的Camoufox版本
+ARG TARGETPLATFORM
 ARG CAMOUFOX_AMD64_URL
 ARG CAMOUFOX_ARM64_URL
 ARG CAMOUFOX_VERSION
-ARG TARGETPLATFORM
 
 RUN set -eux; \
-    if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
-        echo "下载AMD64版本Camoufox..." && \
-        curl -sSL "${CAMOUFOX_AMD64_URL}" -o camoufox.zip; \
-    elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
-        echo "下载ARM64版本Camoufox..." && \
-        curl -sSL "${CAMOUFOX_ARM64_URL}" -o camoufox.zip; \
-    else \
-        echo "不支持的架构: $TARGETPLATFORM" && exit 1; \
-    fi; \
-    mkdir -p camoufox; \
-    unzip camoufox.zip -d camoufox; \
-    rm camoufox.zip; \
-    chmod +x camoufox/camoufox-bin
+    echo "=== 多架构构建信息 ===" && \
+    echo "目标平台: ${TARGETPLATFORM}" && \
+    echo "AMD64 URL: ${CAMOUFOX_AMD64_URL}" && \
+    echo "ARM64 URL: ${CAMOUFOX_ARM64_URL}" && \
+    echo "版本: ${CAMOUFOX_VERSION}" && \
+    echo "======================" && \
+    \
+    case "${TARGETPLATFORM}" in \
+        "linux/amd64") \
+            echo ">>> [AMD64] 开始下载 Camoufox..." && \
+            DOWNLOAD_URL="${CAMOUFOX_AMD64_URL}" \
+            ;; \
+        "linux/arm64") \
+            echo ">>> [ARM64] 开始下载 Camoufox..." && \
+            DOWNLOAD_URL="${CAMOUFOX_ARM64_URL}" \
+            ;; \
+        *) \
+            echo "!!! 错误: 不支持的架构 ${TARGETPLATFORM}" >&2 && \
+            exit 1 \
+            ;; \
+    esac && \
+    \
+    echo ">>> 下载地址: ${DOWNLOAD_URL}" && \
+    curl -fSL --retry 3 --retry-delay 2 "${DOWNLOAD_URL}" -o camoufox.zip && \
+    \
+    echo ">>> 下载完成，文件大小: $(du -h camoufox.zip | cut -f1)" && \
+    echo ">>> 验证文件..." && \
+    [ -f camoufox.zip ] || (echo "!!! 文件不存在" >&2 && exit 1) && \
+    [ -s camoufox.zip ] || (echo "!!! 文件为空" >&2 && exit 1) && \
+    \
+    echo ">>> 解压 Camoufox..." && \
+    unzip -q camoufox.zip || (echo "!!! 解压失败" >&2 && exit 1) && \
+    \
+    echo ">>> 当前目录内容:" && \
+    ls -lah && \
+    \
+    echo ">>> 查找 camoufox-bin 可执行文件..." && \
+    CAMOUFOX_BIN=$(find . -name "camoufox-bin" -type f | head -n 1) && \
+    [ -n "${CAMOUFOX_BIN}" ] || (echo "!!! 未找到 camoufox-bin" >&2 && exit 1) && \
+    echo ">>> 找到: ${CAMOUFOX_BIN}" && \
+    \
+    echo ">>> 整理目录结构..." && \
+    mkdir -p camoufox && \
+    CAMOUFOX_DIR=$(dirname "${CAMOUFOX_BIN}") && \
+    cp -r "${CAMOUFOX_DIR}"/* camoufox/ && \
+    \
+    echo ">>> 设置可执行权限..." && \
+    chmod +x camoufox/camoufox-bin && \
+    \
+    echo ">>> 清理临时文件..." && \
+    rm -rf camoufox.zip camoufox-* camoufox_* && \
+    \
+    echo ">>> 最终目录结构:" && \
+    ls -lah camoufox/ && \
+    \
+    echo ">>> ✓ Camoufox 安装完成 (${TARGETPLATFORM})"
 
 # 4. 【核心优化】现在，才拷贝你经常变动的代码文件。
 # 这一步放在后面，确保你修改代码时，前面所有重量级的层都能利用缓存。
