@@ -10,6 +10,11 @@ on:
         description: "Docker image version tag (e.g., v1.0, v1.1-alpha)"
         required: true
         default: "v2"
+      # 定义一个输入框，让您在运行时输入仓库地址
+      repository:
+        description: "Docker repository (e.g., username/repo-name)"
+        required: true
+        default: "ellinalopez/cloud-studio"
       # 定义一个复选框，让您决定是否更新 latest 标签
       update_latest:
         description: 'Update the "latest" tag as well?'
@@ -63,9 +68,9 @@ jobs:
           push: true
           # 支持多架构构建
           platforms: linux/amd64,linux/arm64
-          # 核心修改：根据您输入的版本号来生成标签
-          # 格式是：ellinalopez/cloud-studio:v1.0-testing
-          tags: ellinalopez/cloud-studio:${{ github.event.inputs.version }}
+          # 核心修改：根据您输入的仓库地址和版本号来生成标签
+          # 格式是：username/repo-name:v1.0-testing
+          tags: ${{ github.event.inputs.repository }}:${{ github.event.inputs.version }}
           build-args: |
             CAMOUFOX_AMD64_URL=${{ env.CAMOUFOX_AMD64_URL }}
             CAMOUFOX_ARM64_URL=${{ env.CAMOUFOX_ARM64_URL }}
@@ -80,5 +85,5 @@ jobs:
         run: |
           # 为多架构镜像创建latest标签
           docker buildx imagetools create \
-            ellinalopez/cloud-studio:${{ github.event.inputs.version }} \
-            --tag ellinalopez/cloud-studio:latest
+            ${{ github.event.inputs.repository }}:${{ github.event.inputs.version }} \
+            --tag ${{ github.event.inputs.repository }}:latest
