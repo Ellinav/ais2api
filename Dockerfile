@@ -39,8 +39,7 @@ RUN set -eux; \
     mkdir -p camoufox; \
     unzip camoufox.zip -d camoufox; \
     rm camoufox.zip; \
-    chmod +x camoufox/camoufox
-
+    chmod +x camoufox/camoufox-bin
 
 # 4. 【核心优化】现在，才拷贝你经常变动的代码文件。
 # 这一步放在后面，确保你修改代码时，前面所有重量级的层都能利用缓存。
@@ -58,7 +57,7 @@ EXPOSE 7860
 EXPOSE 9998
 
 # 设置环境变量
-ENV CAMOUFOX_EXECUTABLE_PATH=/app/camoufox/camoufox
+ENV CAMOUFOX_EXECUTABLE_PATH=/app/camoufox/camoufox-bin
 
 # 定义容器启动命令
 CMD ["node", "unified-server.js"]
