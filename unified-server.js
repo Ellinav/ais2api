@@ -1346,7 +1346,7 @@ class RequestHandler {
     });
     const connectionMaintainer = setInterval(() => {
       if (!res.writableEnded) res.write(": keep-alive\n\n");
-    }, 15000);
+    }, 3000);
 
     try {
       let lastMessage,
@@ -2585,9 +2585,7 @@ class ProxyServerSystem extends EventEmitter {
       const data = {
         status: {
           streamingMode: `${this.streamingMode} (仅启用流式传输时生效)`,
-          forceThinking: this.forceThinking
-            ? "✅ 已启用"
-            : "❌ 已关闭",
+          forceThinking: this.forceThinking ? "✅ 已启用" : "❌ 已关闭",
           browserConnected: !!browserManager.browser,
           immediateSwitchStatusCodes:
             config.immediateSwitchStatusCodes.length > 0
