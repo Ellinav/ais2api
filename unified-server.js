@@ -1236,10 +1236,34 @@ class RequestHandler {
     return `${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
   }
   _buildProxyRequest(req, requestId) {
-    let requestBody = "";
-    if (req.body) {
-      requestBody = JSON.stringify(req.body);
+    let bodyObj = req.body;
+    if (
+      this.serverSystem.forceThinking &&
+      req.method === "POST" &&
+      bodyObj &&
+      bodyObj.contents
+    ) {
+      if (!bodyObj.generationConfig) {
+        bodyObj.generationConfig = {};
+      }
+
+      if (!bodyObj.generationConfig.thinkingConfig) {
+        this.logger.info(
+          `[Proxy] ⚠️ (Google原生格式) 强制推理已启用，且客户端未提供配置，正在注入 thinkingConfig...`
+        );
+        bodyObj.generationConfig.thinkingConfig = { includeThoughts: true };
+      } else {
+        this.logger.info(
+          `[Proxy] ✅ (Google原生格式) 检测到客户端自带推理配置，跳过强制注入。`
+        );
+      }
     }
+
+    let requestBody = "";
+    if (bodyObj) {
+      requestBody = JSON.stringify(bodyObj);
+    }
+
     return {
       path: req.path,
       method: req.method,
