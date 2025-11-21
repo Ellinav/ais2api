@@ -1819,11 +1819,11 @@ class RequestHandler {
 
       // 处理 Budget (预算)
       // if (rawThinkingConfig.thinking_budget !== undefined) {
-        // thinkingConfig.thinkingBudgetTokenLimit =
-          // rawThinkingConfig.thinking_budget;
+      // thinkingConfig.thinkingBudgetTokenLimit =
+      // rawThinkingConfig.thinking_budget;
       //} else if (rawThinkingConfig.thinkingBudget !== undefined) {
-        //thinkingConfig.thinkingBudgetTokenLimit =
-          //rawThinkingConfig.thinkingBudget;
+      //thinkingConfig.thinkingBudgetTokenLimit =
+      //rawThinkingConfig.thinkingBudget;
       //}
 
       this.logger.info(
@@ -2436,7 +2436,7 @@ class ProxyServerSystem extends EventEmitter {
         config.streamingMode
       } (仅启用流式传输时生效)
 <span class="label">强制推理</span>: ${
-        this.forceThinking ? "✅ 已启用 (ON)" : "❌ 已关闭 (OFF)"
+        this.forceThinking ? "✅ 已启用" : "❌ 已关闭"
       }
 <span class="label">立即切换 (状态码)</span>: ${
         config.immediateSwitchStatusCodes.length > 0
