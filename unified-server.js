@@ -1801,18 +1801,28 @@ class RequestHandler {
       openaiBody.thinkingConfig ||
       openaiBody.thinking_config;
 
+    if (!thinkingConfig && openaiBody.reasoning_effort) {
+      this.logger.info(
+        `[Adapter] 检测到 OpenAI 标准推理参数 (reasoning_effort: ${openaiBody.reasoning_effort})，自动转换为 Google 格式。`
+      );
+      thinkingConfig = { includeThoughts: true };
+    }
+
     if (this.serverSystem.forceThinking && !thinkingConfig) {
       this.logger.info(
         "[Adapter] ⚠️ 强制推理已启用，且客户端未提供配置，正在注入 thinkingConfig..."
       );
       thinkingConfig = { includeThoughts: true };
     } else if (thinkingConfig) {
-      this.logger.info("[Adapter] ✅ 检测到客户端自带推理配置，将透传该配置。");
+      this.logger.info(
+        "[Adapter] ✅ 检测到客户端推理配置，将透传/转换该配置。"
+      );
     }
 
     if (thinkingConfig) {
       generationConfig.thinkingConfig = thinkingConfig;
     }
+    // ------------------------------------------
 
     googleRequest.generationConfig = generationConfig;
 
