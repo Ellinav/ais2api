@@ -1818,13 +1818,13 @@ class RequestHandler {
       }
 
       // 处理 Budget (预算)
-      if (rawThinkingConfig.thinking_budget !== undefined) {
-        thinkingConfig.thinkingBudgetTokenLimit =
-          rawThinkingConfig.thinking_budget;
-      } else if (rawThinkingConfig.thinkingBudget !== undefined) {
-        thinkingConfig.thinkingBudgetTokenLimit =
-          rawThinkingConfig.thinkingBudget;
-      }
+      // if (rawThinkingConfig.thinking_budget !== undefined) {
+        // thinkingConfig.thinkingBudgetTokenLimit =
+          // rawThinkingConfig.thinking_budget;
+      //} else if (rawThinkingConfig.thinkingBudget !== undefined) {
+        //thinkingConfig.thinkingBudgetTokenLimit =
+          //rawThinkingConfig.thinkingBudget;
+      //}
 
       this.logger.info(
         `[Adapter] 成功提取并转换推理配置: ${JSON.stringify(thinkingConfig)}`
