@@ -1124,6 +1124,7 @@ class RequestHandler {
               break;
             }
             if (message.data) {
+              // [修改] 将 streamState 传递给翻译函数
               const translatedChunk = this._translateGoogleToOpenAIStream(
                 message.data,
                 model,
@@ -1816,7 +1817,11 @@ class RequestHandler {
     return googleRequest;
   }
 
-  _translateGoogleToOpenAIStream(googleChunk, modelName = "gemini-pro") {
+  _translateGoogleToOpenAIStream(
+    googleChunk,
+    modelName = "gemini-pro",
+    streamState = {}
+  ) {
     if (!googleChunk || googleChunk.trim() === "") {
       return null;
     }
@@ -1858,7 +1863,6 @@ class RequestHandler {
       return null;
     }
 
-    // [核心修正] 引入与非流式一致的图片和文本解析逻辑
     let content = "";
     if (candidate.content && Array.isArray(candidate.content.parts)) {
       const imagePart = candidate.content.parts.find((p) => p.inlineData);
@@ -1868,8 +1872,20 @@ class RequestHandler {
         content = `![Generated Image](data:${image.mimeType};base64,${image.data})`;
         this.logger.info("[Adapter] 从流式响应块中成功解析到图片。");
       } else {
-        // 没有图片，则按原样拼接文本
-        content = candidate.content.parts.map((p) => p.text).join("") || "";
+        for (const part of candidate.content.parts) {
+          const text = part.text || "";
+          const isThought = part.thought === true;
+
+          if (isThought && !streamState.inThought) {
+            content += "<think>\n" + text;
+            streamState.inThought = true;
+          } else if (!isThought && streamState.inThought) {
+            content += "\n</think>\n" + text;
+            streamState.inThought = false;
+          } else {
+            content += text;
+          }
+        }
       }
     }
 
