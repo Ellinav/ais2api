@@ -1721,6 +1721,7 @@ class RequestHandler {
   }
 
   _translateOpenAIToGoogle(openaiBody, modelName = "") {
+    this.logger.info(`[Debug] OpenAI Raw Body: ${JSON.stringify(openaiBody)}`);
     this.logger.info("[Adapter] 开始将OpenAI请求格式翻译为Google格式...");
 
     let systemInstruction = null;
@@ -1801,9 +1802,11 @@ class RequestHandler {
       openaiBody.thinkingConfig ||
       openaiBody.thinking_config;
 
-    if (!thinkingConfig && openaiBody.reasoning_effort) {
+    const effort = openaiBody.reasoning_effort || extraBody.reasoning_effort;
+
+    if (!thinkingConfig && effort) {
       this.logger.info(
-        `[Adapter] 检测到 OpenAI 标准推理参数 (reasoning_effort: ${openaiBody.reasoning_effort})，自动转换为 Google 格式。`
+        `[Adapter] 检测到 OpenAI 标准推理参数 (reasoning_effort: ${effort})，自动转换为 Google 格式。`
       );
       thinkingConfig = { includeThoughts: true };
     }
@@ -1822,7 +1825,6 @@ class RequestHandler {
     if (thinkingConfig) {
       generationConfig.thinkingConfig = thinkingConfig;
     }
-    // ------------------------------------------
 
     googleRequest.generationConfig = generationConfig;
 
