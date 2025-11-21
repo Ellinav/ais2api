@@ -2586,8 +2586,8 @@ class ProxyServerSystem extends EventEmitter {
         status: {
           streamingMode: `${this.streamingMode} (仅启用流式传输时生效)`,
           forceThinking: this.forceThinking
-            ? "✅ 已启用 (ON)"
-            : "❌ 已关闭 (OFF)",
+            ? "✅ 已启用"
+            : "❌ 已关闭",
           browserConnected: !!browserManager.browser,
           immediateSwitchStatusCodes:
             config.immediateSwitchStatusCodes.length > 0
@@ -2670,7 +2670,7 @@ class ProxyServerSystem extends EventEmitter {
 
     app.post("/api/toggle-force-thinking", isAuthenticated, (req, res) => {
       this.forceThinking = !this.forceThinking;
-      const statusText = this.forceThinking ? "已启用 (ON)" : "已关闭 (OFF)";
+      const statusText = this.forceThinking ? "已启用" : "已关闭";
       this.logger.info(`[WebUI] 强制推理开关已切换为: ${statusText}`);
       res.status(200).send(`强制推理模式: ${statusText}`);
     });
