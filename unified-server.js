@@ -1099,16 +1099,35 @@ class RequestHandler {
         if (useRealStream) {
           this.logger.info(`[Adapter] OpenAI 流式响应 (Real Mode) 已启动...`);
           let lastGoogleChunk = "";
+          const streamState = { inThought: false };
+
           while (true) {
-            const message = await messageQueue.dequeue(300000);
+            const message = await messageQueue.dequeue(300000); // 5分钟超时
             if (message.type === "STREAM_END") {
+              if (streamState.inThought) {
+                const closeThoughtPayload = {
+                  id: `chatcmpl-${requestId}`,
+                  object: "chat.completion.chunk",
+                  created: Math.floor(Date.now() / 1000),
+                  model: model,
+                  choices: [
+                    {
+                      index: 0,
+                      delta: { content: "\n</think>\n" },
+                      finish_reason: null,
+                    },
+                  ],
+                };
+                res.write(`data: ${JSON.stringify(closeThoughtPayload)}\n\n`);
+              }
               res.write("data: [DONE]\n\n");
               break;
             }
             if (message.data) {
               const translatedChunk = this._translateGoogleToOpenAIStream(
                 message.data,
-                model
+                model,
+                streamState
               );
               if (translatedChunk) {
                 res.write(translatedChunk);
@@ -1168,7 +1187,14 @@ class RequestHandler {
             );
           } else {
             responseContent =
-              candidate.content.parts.map((p) => p.text).join("\n") || "";
+              candidate.content.parts
+                .map((p) => {
+                  if (p.thought) {
+                    return `<think>\n${p.text}\n</think>\n`;
+                  }
+                  return p.text;
+                })
+                .join("\n") || "";
           }
         }
 
@@ -2636,3 +2662,4 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
+
