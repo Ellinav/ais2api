@@ -224,7 +224,7 @@ class BrowserManager {
         args: this.launchArgs,
       });
       this.browser.on("disconnected", () => {
-        this.logger.error("❌ [Browser] 浏览器意外断开连接！(可能是资源不足)");
+        this.logger.error("❌ [Browser] 浏览器意外断开连接！");
         this.browser = null;
         this.context = null;
         this.page = null;
