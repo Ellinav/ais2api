@@ -1721,7 +1721,6 @@ class RequestHandler {
   }
 
   _translateOpenAIToGoogle(openaiBody, modelName = "") {
-    this.logger.info(`[Debug] OpenAI Raw Body: ${JSON.stringify(openaiBody)}`);
     this.logger.info("[Adapter] 开始将OpenAI请求格式翻译为Google格式...");
 
     let systemInstruction = null;
@@ -1797,31 +1796,61 @@ class RequestHandler {
     };
 
     const extraBody = openaiBody.extra_body || {};
-    let thinkingConfig =
+    let rawThinkingConfig =
+      extraBody.google?.thinking_config ||
+      extraBody.google?.thinkingConfig ||
       extraBody.thinkingConfig ||
+      extraBody.thinking_config ||
       openaiBody.thinkingConfig ||
       openaiBody.thinking_config;
 
-    const effort = openaiBody.reasoning_effort || extraBody.reasoning_effort;
+    let thinkingConfig = null;
 
-    if (!thinkingConfig && effort) {
+    if (rawThinkingConfig) {
+      // 2. 格式清洗：将 snake_case (下划线) 转换为 camelCase (驼峰)
+      thinkingConfig = {};
+
+      // 处理开关
+      if (rawThinkingConfig.include_thoughts !== undefined) {
+        thinkingConfig.includeThoughts = rawThinkingConfig.include_thoughts;
+      } else if (rawThinkingConfig.includeThoughts !== undefined) {
+        thinkingConfig.includeThoughts = rawThinkingConfig.includeThoughts;
+      }
+
+      // 处理 Budget (预算)
+      if (rawThinkingConfig.thinking_budget !== undefined) {
+        thinkingConfig.thinkingBudgetTokenLimit =
+          rawThinkingConfig.thinking_budget;
+      } else if (rawThinkingConfig.thinkingBudget !== undefined) {
+        thinkingConfig.thinkingBudgetTokenLimit =
+          rawThinkingConfig.thinkingBudget;
+      }
+
       this.logger.info(
-        `[Adapter] 检测到 OpenAI 标准推理参数 (reasoning_effort: ${effort})，自动转换为 Google 格式。`
+        `[Adapter] 成功提取并转换推理配置: ${JSON.stringify(thinkingConfig)}`
       );
-      thinkingConfig = { includeThoughts: true };
     }
 
+    // 3. 如果没找到配置，尝试识别 OpenAI 标准参数 'reasoning_effort'
+    if (!thinkingConfig) {
+      const effort = openaiBody.reasoning_effort || extraBody.reasoning_effort;
+      if (effort) {
+        this.logger.info(
+          `[Adapter] 检测到 OpenAI 标准推理参数 (reasoning_effort: ${effort})，自动转换为 Google 格式。`
+        );
+        thinkingConfig = { includeThoughts: true };
+      }
+    }
+
+    // 4. 强制开启逻辑 (WebUI开关)
     if (this.serverSystem.forceThinking && !thinkingConfig) {
       this.logger.info(
         "[Adapter] ⚠️ 强制推理已启用，且客户端未提供配置，正在注入 thinkingConfig..."
       );
       thinkingConfig = { includeThoughts: true };
-    } else if (thinkingConfig) {
-      this.logger.info(
-        "[Adapter] ✅ 检测到客户端推理配置，将透传/转换该配置。"
-      );
     }
 
+    // 5. 写入最终配置
     if (thinkingConfig) {
       generationConfig.thinkingConfig = thinkingConfig;
     }
