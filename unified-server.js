@@ -2509,10 +2509,6 @@ class ProxyServerSystem extends EventEmitter {
       )}] (总数: ${invalidIndices.length})
             </pre>
         </div>
-        <div id="log-section" style="margin-top: 2em;">
-            <h2>实时日志 (最近 ${logs.length} 条)</h2>
-            <pre id="log-container">${logs.join("\n")}</pre>
-        </div>
         <div id="actions-section" style="margin-top: 2em;">
             <h2>操作面板</h2>
             <div class="action-group">
@@ -2521,6 +2517,10 @@ class ProxyServerSystem extends EventEmitter {
                 <button onclick="toggleStreamingMode()">切换流模式</button>
                 <button onclick="toggleForceThinking()">切换强制推理</button>
             </div>
+        </div>
+        <div id="log-section" style="margin-top: 2em;">
+            <h2>实时日志 (最近 ${logs.length} 条)</h2>
+            <pre id="log-container">${logs.join("\n")}</pre>
         </div>
         </div>
         <script>
