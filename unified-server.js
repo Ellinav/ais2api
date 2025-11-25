@@ -13,7 +13,6 @@ const os = require("os");
 // ===================================================================================
 // AUTH SOURCE MANAGEMENT MODULE
 // ===================================================================================
-
 class AuthSource {
   constructor(logger) {
     this.logger = logger;
@@ -2782,3 +2781,4 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
+
