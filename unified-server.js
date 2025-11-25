@@ -289,6 +289,54 @@ class BrowserManager {
 
       await this.page.waitForTimeout(3000);
 
+      const currentUrl = this.page.url();
+      let pageTitle = "";
+      try {
+        pageTitle = await this.page.title();
+      } catch (e) {
+        this.logger.warn(`[Browser] 无法获取页面标题: ${e.message}`);
+      }
+
+      this.logger.info(`[Browser] [诊断] URL: ${currentUrl}`);
+      this.logger.info(`[Browser] [诊断] Title: "${pageTitle}"`);
+
+      // 1. 检查 Cookie 是否失效 (跳转回登录页)
+      if (
+        currentUrl.includes("accounts.google.com") ||
+        currentUrl.includes("ServiceLogin") ||
+        pageTitle.includes("Sign in") ||
+        pageTitle.includes("登录")
+      ) {
+        throw new Error(
+          "🚨 Cookie 已失效/过期！浏览器被重定向到了 Google 登录页面。请重新提取 storageState。"
+        );
+      }
+
+      // 2. 检查 IP 地区限制 (Region Unsupported)
+      // 通常标题是 "Google AI Studio is not available in your location"
+      if (
+        pageTitle.includes("Available regions") ||
+        pageTitle.includes("not available")
+      ) {
+        throw new Error(
+          "🚨 当前 IP 不支持访问 Google AI Studio (地区受限/送中)。Claw 节点可能被识别为受限地区，请尝试重启容器获取新IP。"
+        );
+      }
+
+      // 3. 检查 IP 风控 (403 Forbidden)
+      if (pageTitle.includes("403") || pageTitle.includes("Forbidden")) {
+        throw new Error(
+          "🚨 403 Forbidden：当前 IP 信誉过低，被 Google 风控拒绝访问。"
+        );
+      }
+
+      // 4. 检查白屏 (网络极差或加载失败)
+      if (currentUrl === "about:blank") {
+        throw new Error(
+          "🚨 页面加载失败 (about:blank)，可能是网络连接超时或浏览器崩溃。"
+        );
+      }
+
       this.logger.info(`[Browser] 正在检查 Cookie 同意横幅...`);
       try {
         const agreeButton = this.page.locator('button:text("Agree")');
