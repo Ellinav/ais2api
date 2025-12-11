@@ -255,10 +255,49 @@ class BrowserManager {
         `Failed to get or parse auth source for index ${authIndex}.`
       );
     }
-    const buildScriptContent = fs.readFileSync(
+    let buildScriptContent = fs.readFileSync(
       path.join(__dirname, this.scriptFileName),
       "utf-8"
     );
+    
+    // Replace hardcoded maxRetries and retryDelay with config values
+    this.logger.info(`[Config] 正在设置重试参数 - maxRetries: ${this.config.maxRetries}, retryDelay: ${this.config.retryDelay}`);
+    
+    // 使用更直接的方法：按行处理文件内容
+    const lines = buildScriptContent.split('\n');
+
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('this.maxRetries =')) {
+        this.logger.info(`[Config] 找到 maxRetries 行: ${lines[i]}`);
+        // 使用更安全的默认值处理，区分 0 和 undefined/null
+        const maxRetriesValue = this.config.maxRetries !== undefined ? this.config.maxRetries : 3;
+        lines[i] = `    this.maxRetries = ${maxRetriesValue}; // 最多尝试${maxRetriesValue}次`;
+        this.logger.info(`[Config] 替换为: ${lines[i]}`);
+      } else if (lines[i].includes('this.retryDelay =')) {
+        this.logger.info(`[Config] 找到 retryDelay 行: ${lines[i]}`);
+        // 使用更安全的默认值处理，区分 0 和 undefined/null
+        const retryDelayValue = this.config.retryDelay !== undefined ? this.config.retryDelay : 2000;
+        lines[i] = `    this.retryDelay = ${retryDelayValue}; // 每次重试前等待${retryDelayValue}毫秒`;
+        this.logger.info(`[Config] 替换为: ${lines[i]}`);
+      } else if (lines[i].includes('this.targetDomain =')) {
+        this.logger.info(`[Config] 找到 targetDomain 行: ${lines[i]}`);
+        if (process.env.TARGET_DOMAIN) {
+          lines[i] = `    this.targetDomain = "${process.env.TARGET_DOMAIN}";`;
+          this.logger.info(`[Config] 替换为: ${lines[i]}`);
+        }
+      }
+    }
+    
+    // 重新组合内容
+    buildScriptContent = lines.join('\n');
+
+    // 再次验证替换结果
+    const newLines = buildScriptContent.split('\n');
+    newLines.forEach((line, index) => {
+      if (line.includes('this.maxRetries =') || line.includes('this.retryDelay =') || line.includes('this.targetDomain =')) {
+        this.logger.info(`[Config] 最终结果 - 第 ${index + 1} 行: ${line}`);
+      }
+    });
 
     try {
       this.context = await this.browser.newContext({
@@ -2781,4 +2820,3 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
-
