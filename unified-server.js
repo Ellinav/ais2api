@@ -2342,7 +2342,7 @@ class ProxyServerSystem extends EventEmitter {
       );
       res.header(
         "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, x-requested-with, x-api-key, x-goog-api-key, origin, accept"
+        "Content-Type, Authorization, x-requested-with, x-api-key, x-goog-api-key, x-goog-api-client, x-user-agent, origin, accept, baggage, sentry-trace"
       );
       if (req.method === "OPTIONS") {
         return res.sendStatus(204);
