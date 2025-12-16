@@ -556,28 +556,24 @@ class BrowserManager {
 
   async tryDismissLaunchButton() {
     const currentPage = this.page;
-    // 基础检查：页面必须存在且未关闭
     if (!currentPage || currentPage.isClosed()) return;
 
     try {
-      // 1. 强制唤醒：将页面置于前台，确保渲染优先级
+      // 1. 强制唤醒页面
       await currentPage.bringToFront().catch(() => {});
 
-      // 2. 极速扫描：寻找符合 Y轴(400-800) 限制的 Launch 按钮
+      // 2. 扫描 Launch 按钮 (Y轴 400-800)
       const targetInfo = await currentPage.evaluate(() => {
         const candidates = Array.from(
           document.querySelectorAll('button, span, div[role="button"], a')
         );
-
         for (const el of candidates) {
           const text = el.innerText || "";
-          // 匹配 Launch 或 rocket_launch 图标文本
           if (!/Launch|rocket_launch/i.test(text)) continue;
 
           const rect = el.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) continue;
 
-          // Y轴安全区锁定 (400 - 800)，避开右上角
           if (rect.top > 400 && rect.top < 800) {
             return {
               found: true,
@@ -590,36 +586,21 @@ class BrowserManager {
         return { found: false };
       });
 
-      // 3. 如果发现目标，执行“沉浸式”点击
+      // 3. 发现则点击
       if (targetInfo.found) {
         this.logger.info(
-          `[Browser] 🛡️ 请求前置检查：发现 "${targetInfo.text}" 按钮，正在清除...`
+          `[Browser] 🛡️ 检测到 "${targetInfo.text}" 按钮，正在消除...`
         );
-
-        // A. 移动鼠标到目标
         await currentPage.mouse.move(targetInfo.x, targetInfo.y);
-
-        // B. [关键调整] 增加悬停时间 (由200ms -> 500ms)
-        await new Promise((r) => setTimeout(r, 500));
-
-        // C. 按下鼠标
+        await new Promise((r) => setTimeout(r, 500)); // 悬停
         await currentPage.mouse.down();
-
-        // D. [关键调整] 增加按压时间 (由300ms -> 600ms)
-        await new Promise((r) => setTimeout(r, 600));
-
-        // E. 抬起鼠标
+        await new Promise((r) => setTimeout(r, 600)); // 长按
         await currentPage.mouse.up();
-
-        this.logger.info(`[Browser] 🖱️ 点击完成，等待界面响应...`);
-
-        // F. 等待按钮消失或页面刷新 (1.5秒)
-        await new Promise((r) => setTimeout(r, 1500));
+        this.logger.info(`[Browser] 🖱️ 点击完成，等待生效...`);
+        await new Promise((r) => setTimeout(r, 1500)); // 等待消失
       }
     } catch (e) {
-      this.logger.warn(
-        `[Browser] 尝试消除 Launch 按钮时出错 (非致命): ${e.message}`
-      );
+      this.logger.warn(`[Browser] 消除按钮尝试失败(非致命): ${e.message}`);
     }
   }
 }
@@ -1135,9 +1116,10 @@ class RequestHandler {
       req.headers.accept && req.headers.accept.includes("text/event-stream");
     const wantsStreamByPath = req.path.includes(":streamGenerateContent");
     const wantsStream = wantsStreamByHeader || wantsStreamByPath;
-
-    try {
+    if (this.browserManager) {
       await this.browserManager.tryDismissLaunchButton();
+    }
+    try {
       if (wantsStream) {
         // --- 客户端想要流式响应 ---
         this.logger.info(
@@ -1221,7 +1203,6 @@ class RequestHandler {
     const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
 
     try {
-      await this.browserManager.tryDismissLaunchButton();
       this._forwardRequest(proxyRequest);
       const initialMessage = await messageQueue.dequeue();
 
@@ -2840,13 +2821,11 @@ class ProxyServerSystem extends EventEmitter {
 
     app.get("/v1/models", async (req, res) => {
       try {
-        // 注意：这里需要通过 this 访问 requestHandler 或 browserManager
-        // 建议直接调用 browserManager，或者通过 requestHandler 调用
         if (this.browserManager) {
           await this.browserManager.tryDismissLaunchButton();
         }
       } catch (e) {
-        this.logger.warn(`[Models] 尝试消除 Launch 按钮失败: ${e.message}`);
+        this.logger.warn(`[Models] 消除按钮检查失败: ${e.message}`);
       }
 
       const modelIds = this.config.modelList || ["gemini-2.5-pro"];
