@@ -687,10 +687,10 @@ class BrowserManager {
     }
     if (this.page !== currentPage) {
       this.logger.info(
-        "[Browser] (后台任务) 检测到账号切换，旧的守护任务已自动销毁。"
+        "[Browser] (后台任务) 🛡️ 检测到账号切换，旧的守护任务已自动销毁。"
       );
     } else {
-      this.logger.info("[Browser] (后台任务) 页面关闭，守护结束。");
+      this.logger.info("[Browser] (后台任务) 🛡️ 页面关闭，守护结束。");
     }
   }
 }
