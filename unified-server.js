@@ -568,152 +568,105 @@ class BrowserManager {
 
   // 2. 内部逻辑：执行短时间的密集扫描
   async _runGuardianBurst(durationMs) {
-    // 防止重入
     if (this._isGuardianRunning) return;
     this._isGuardianRunning = true;
 
-    const currentPage = this.page;
     const startTime = Date.now();
-    let attemptCount = 0;
-
     this.logger.info(
-      `[Browser] 🛡️ 突发守护模式启动 (预算: ${durationMs / 1000}秒)...`
+      `[Browser] 🛡️ 启动社区版强力守护 (策略: Force Click + 1s Delay)...`
     );
 
     try {
       while (Date.now() - startTime < durationMs) {
-        if (
-          !currentPage ||
-          currentPage.isClosed() ||
-          this.page !== currentPage
-        ) {
-          this.logger.warn("[Browser] 页面已关闭或上下文已切换，守护中止。");
-          break;
-        }
+        if (!this.page || this.page.isClosed()) break;
 
-        attemptCount++;
-
-        // --- 核心查找逻辑 (纯 JS 瞬时查找) ---
-        const targetInfo = await currentPage.evaluate(() => {
-          // 优先查找 rocket_launch 图标或 Launch 文本
-          const candidates = Array.from(
-            document.querySelectorAll(
-              'button, span, div[role="button"], a, mat-icon'
-            )
-          );
-
-          for (const el of candidates) {
-            const text = el.innerText || "";
-            // 匹配 rocket_launch (图标名) 或 Launch (文本)
-            if (!/Launch|rocket_launch/i.test(text)) continue;
-
-            const rect = el.getBoundingClientRect();
-            // 必须可见且在安全区 (Y: 400-900, 放宽一点范围)
-            if (
-              rect.width > 0 &&
-              rect.height > 0 &&
-              rect.top > 300 &&
-              rect.top < 700
-            ) {
-              return {
-                found: true,
-                x: rect.left + rect.width / 2,
-                y: rect.top + rect.height / 2,
-                text: text.substring(0, 15),
-              };
-            }
-          }
-
-          // 顺手处理一下 Got it (无阻塞)
+        // 步骤1: 获取目标元素的句柄 (Handle)
+        // 我们不只获取坐标，而是获取这个 DOM 元素本身，这样才能用 .click({ force: true })
+        const elementHandle = await this.page.evaluateHandle(() => {
+          // 顺手点一下 Got it (无阻塞)
           const gotIt = Array.from(document.querySelectorAll("button")).find(
             (b) => b.innerText.includes("Got it")
           );
           if (gotIt) gotIt.click();
 
-          return { found: false };
+          // 寻找目标
+          const candidates = Array.from(
+            document.querySelectorAll(
+              'button, span, div[role="button"], mat-icon'
+            )
+          );
+
+          return candidates.find((el) => {
+            const text = el.innerText || "";
+            // 必须匹配文本
+            if (!/Launch|rocket_launch/i.test(text)) return false;
+
+            // 必须在安全区域 (Y > 300) 防止点到顶栏
+            const rect = el.getBoundingClientRect();
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              rect.top > 300 &&
+              rect.top < 900
+            );
+          });
         });
 
-        // --- 命中处理 ---
-        if (targetInfo.found) {
+        // 步骤2: 检查是否找到了元素
+        // elementHandle 永远是一个 JSHandle，需要判断它内部是不是 null
+        const isElementFound = await elementHandle.evaluate((node) => !!node);
+
+        if (isElementFound) {
           this.logger.info(
-            `[Browser] 🎯 (第${attemptCount}次扫描) 锁定目标 "${
-              targetInfo.text
-            }" @ ${Math.round(targetInfo.x)},${Math.round(targetInfo.y)}`
+            `[Browser] 🎯 发现目标，执行 force: true 强力点击...`
           );
 
-          // === 改进后的点击流程 ===
-
-          // 1. 标准鼠标点击 (模拟真人稍微一点点延迟，而不是长按)
           try {
-            await currentPage.mouse.move(targetInfo.x, targetInfo.y);
-            await new Promise((r) => setTimeout(r, 100)); // 悬停一小会儿
-            await currentPage.mouse.click(targetInfo.x, targetInfo.y, {
-              delay: 50,
-            }); // 按下抬起间隔50ms
-          } catch (err) {
-            this.logger.warn(`[Browser] 鼠标点击失败: ${err.message}`);
-          }
+            // --- 社区方案核心 ---
+            // force: true -> 无视遮罩层，强制触发点击
+            // timeout: 1000 -> 如果1秒点不下去就报错重试，别卡着
+            await elementHandle.click({ force: true, timeout: 1000 });
 
-          // 2. 智能等待验证 (最多等 1.5 秒，每 250ms 检查一次)
-          let clickedSuccess = false;
-          for (let k = 0; k < 6; k++) {
-            await new Promise((r) => setTimeout(r, 250));
+            this.logger.info(`[Browser] 🖱️ 点击已发送，等待 1秒 让页面反应...`);
+            // --- 关键等待 ---
+            await this.page.waitForTimeout(1000);
 
-            const stillExists = await currentPage.evaluate(() => {
-              const els = Array.from(
-                document.querySelectorAll("button, span, mat-icon")
-              );
-              return els.some(
-                (el) =>
-                  /Launch|rocket_launch/i.test(el.innerText) &&
-                  el.getBoundingClientRect().top > 300
-              );
-            });
+            // 验证是否消失 (如果元素脱离文档流/被销毁，evaluate 会报错或返回 false)
+            const stillExists = await elementHandle
+              .evaluate((node) => {
+                const r = node.getBoundingClientRect();
+                return (
+                  r.width > 0 && r.height > 0 && document.body.contains(node)
+                );
+              })
+              .catch(() => false);
 
             if (!stillExists) {
-              clickedSuccess = true;
+              this.logger.info(`[Browser] ✅ 成功！目标已消失，守护任务完成。`);
+              await elementHandle.dispose().catch(() => {});
               break;
+            } else {
+              this.logger.warn(`[Browser] ⚠️ 按钮仍在，准备进行下一轮尝试...`);
             }
+          } catch (err) {
+            this.logger.warn(
+              `[Browser] 点击动作异常 (可能元素已动态变化): ${err.message}`
+            );
           }
-
-          if (clickedSuccess) {
-            this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失。`);
-            break; // 成功退出
-          }
-
-          // 3. 如果鼠标点击无效，启用备用方案：JS 暴力点击
-          this.logger.warn(
-            `[Browser] ⚠️ 鼠标点击后按钮仍在，尝试 JS 强力点击...`
-          );
-          await currentPage.evaluate((info) => {
-            const el = document.elementFromPoint(info.x, info.y);
-            if (el) {
-              el.click(); // 原生 DOM 点击
-              // 如果里面包了按钮，尝试向上找父级点击
-              if (el.tagName !== "BUTTON") {
-                const btn = el.closest("button");
-                if (btn) btn.click();
-              }
-            }
-          }, targetInfo);
-
-          // JS点击后再等一小会儿
-          await new Promise((r) => setTimeout(r, 500));
         } else {
-          // 如果这轮没找到，稍微多睡一会避免刷屏
-          // this.logger.debug(`[Browser] 扫描未发现目标...`);
-          await new Promise((r) => setTimeout(r, 800));
+          // 没找到目标，稍微休息一下再找，避免 CPU 爆炸
+          await this.page.waitForTimeout(500);
         }
+
+        // 释放句柄防止内存泄漏
+        await elementHandle.dispose().catch(() => {});
       }
     } catch (e) {
       this.logger.error(`[Browser] 守护进程发生异常: ${e.message}`);
     } finally {
       this._isGuardianRunning = false;
-      // 只有当时间真的耗尽且没成功退出时，才打印这个，提示用户
       if (Date.now() - startTime >= durationMs) {
-        this.logger.info(
-          `[Browser] 🛑 守护模式时间片(${durationMs}ms)耗尽，停止扫描。`
-        );
+        this.logger.info(`[Browser] 🛑 守护模式时间片耗尽，停止扫描。`);
       }
     }
   }
