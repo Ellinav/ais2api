@@ -558,14 +558,18 @@ class BrowserManager {
   async _startBackgroundWakeup() {
     // 锁定当前页面实例
     const currentPage = this.page;
-    await new Promise((r) => setTimeout(r, 1000)); // 启动缓冲
+    // 启动缓冲
+    await new Promise((r) => setTimeout(r, 1000));
 
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
 
     this.logger.info(
-      "[Browser] (后台任务) 🛡️ V7 物理鼠标版启动：文本扫描 -> 坐标锁定 -> 鼠标点击"
+      "[Browser] (后台任务) 🛡️ V8 抗休眠引擎启动：主动激活 + 物理点击"
     );
+
+    // 定义一个鼠标抖动的辅助变量
+    let jiggleX = 100;
 
     while (
       currentPage &&
@@ -573,84 +577,90 @@ class BrowserManager {
       this.page === currentPage
     ) {
       try {
-        // --- 1. 顺手清理 "Got it" (使用最激进的策略) ---
-        // 只要看见 Got it 文本就点，不管它是什么标签
+        // --- [核心改进 1] 主动骚扰浏览器 (模拟 /models 请求带来的唤醒效果) ---
+        // 1. 强制聚焦窗口 (告诉浏览器：我很重要，别休眠)
+        await currentPage.evaluate(() => window.focus()).catch(() => {});
+
+        // 2. 鼠标微动 (模拟用户活跃，触发浏览器的渲染层)
+        // 每次循环稍微移动一下鼠标，防止被判定为 idle
+        jiggleX = jiggleX === 100 ? 101 : 100;
+        await currentPage.mouse.move(jiggleX, 100);
+
+        // --- [核心改进 2] 顺手清理 "Got it" ---
         try {
           const gotIt = currentPage.getByText("Got it").first();
-          if (await gotIt.isVisible({ timeout: 100 })) {
+          if (await gotIt.isVisible({ timeout: 50 })) {
             await gotIt.click({ force: true, noWaitAfter: true });
           }
         } catch (e) {}
 
-        // --- 2. 核心查找：只找文本，不关心标签 (极速) ---
-        // 这样可以同时匹配 <button>Launch</button> 和 <span>rocket_launch</span>
-        const candidates = await currentPage
-          .getByText(/Launch|rocket_launch/i)
-          .all();
+        // --- 3. 查找逻辑 (保持 V7 的文本查找) ---
+        // 注意：这里把 timeout 设为 500ms，配合循环，相当于每 0.5 秒“主动”看一次
+        // 相比之前的死等，这种“主动激活+短时查找”更能对抗卡顿
+        let candidates = [];
+        try {
+          // 使用 locator + all() 获取当前快照
+          candidates = await currentPage
+            .getByText(/Launch|rocket_launch/i)
+            .all();
+        } catch (e) {}
 
         let targetFound = false;
 
-        // --- 3. 遍历候选者 (通常页面上只有2-3个，循环极快) ---
         for (const candidate of candidates) {
           try {
-            // 必须可见
+            // 快速检查可见性
             if (!(await candidate.isVisible({ timeout: 100 }))) continue;
 
             const box = await candidate.boundingBox();
             if (!box) continue;
 
-            // [安全区判断] Y 轴必须在 400 到 800 之间
-            // 这能完美避开右上角的 rocket_launch (Y < 100)
+            // [安全区] Y 轴必须在 400 到 800 之间
             if (box.y > 400 && box.y < 800) {
               targetFound = true;
 
-              // 计算中心点
               const x = box.x + box.width / 2;
               const y = box.y + box.height / 2;
 
               this.logger.info(
-                `[Browser] 🎯 锁定目标 (Text) @ ${Math.round(x)},${Math.round(
+                `[Browser] 🎯 发现目标 (Text) @ ${Math.round(x)},${Math.round(
                   y
                 )} - 正在执行物理点击...`
               );
 
-              // --- 4. [核心] 物理鼠标点击 ---
-              // 不再信任 DOM 元素的 click()，直接操作鼠标
+              // --- 4. 物理点击 (保持 V7 的成功逻辑) ---
               await currentPage.mouse.move(x, y);
               await currentPage.mouse.down();
-              await new Promise((r) => setTimeout(r, 100)); // 模拟手指按下的短暂停留
+              await new Promise((r) => setTimeout(r, 100)); // 按下保持
               await currentPage.mouse.up();
 
-              // 点击后，稍微等一下，不要疯狂连点
+              // 稍微等待看效果
               await new Promise((r) => setTimeout(r, 1000));
 
-              // 检查是否消失，如果消失了就退出
-              if (
-                !(await candidate
-                  .isVisible({ timeout: 500 })
-                  .catch(() => false))
-              ) {
+              // 检查是否消失
+              const stillVisible = await candidate
+                .isVisible({ timeout: 200 })
+                .catch(() => false);
+              if (!stillVisible) {
                 this.logger.info(`[Browser] ✅ 物理点击生效！按钮已消失。`);
+                // 成功后，为了防止复活，我们不完全退出，而是进入长轮询模式 (每30秒检查一次)
+                // 这样万一它又弹出来也能处理
                 await new Promise((r) => setTimeout(r, 30000));
-                return; // 退出本次循环等待
               } else {
                 this.logger.warn(`[Browser] ⚠️ 点击后按钮未消失，正在重试...`);
               }
 
-              // 只要找到了一个符合条件的，处理完就跳出 candidates 循环，进入下一次大循环
-              break;
+              break; // 跳出 candidates 循环
             }
-          } catch (innerE) {
-            // 忽略单个元素在判断过程中的失效
-          }
+          } catch (innerE) {}
         }
 
+        // 如果本轮没找到，短暂休眠 (不要太久，保持“热度”)
         if (!targetFound) {
-          // 如果没找到目标，短暂停顿避免 CPU 满载
-          await new Promise((r) => setTimeout(r, 1000));
+          await new Promise((r) => setTimeout(r, 500));
         }
       } catch (e) {
-        // 忽略上下文丢失等错误
+        // 发生严重错误（如页面关闭），稍作等待
         await new Promise((r) => setTimeout(r, 1000));
       }
     }
