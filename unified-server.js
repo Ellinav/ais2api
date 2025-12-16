@@ -554,8 +554,7 @@ class BrowserManager {
       `✅ [Browser] 账号切换完成，当前账号: ${this.currentAuthIndex}`
     );
   }
-  
-async _startBackgroundWakeup() {
+  async _startBackgroundWakeup() {
     // 1. 启动缓冲
     await new Promise((r) => setTimeout(r, 5000));
 
@@ -590,85 +589,110 @@ async _startBackgroundWakeup() {
         let targetIndex = -1;
 
         if (count > 0) {
-            for (let i = 0; i < count; i++) {
-                const btn = candidates.nth(i);
-                try {
-                    const box = await btn.boundingBox();
-                    // [核心安全锁] 只要 Y > 100，就绝对不是右上角的按钮
-                    if (box && box.y > 100) {
-                        targetIndex = i;
-                        // 打印日志方便调试，但只打印一次
-                        if (!isClicking) {
-                             const text = (await btn.innerText()).replace(/\n/g, '').substring(0, 10);
-                             this.logger.warn(`[Browser] 🎯 锁定目标 (Y=${Math.round(box.y)}): "${text}"`);
-                        }
-                        break; 
-                    }
-                } catch (e) { /* 忽略过期的元素 */ }
+          for (let i = 0; i < count; i++) {
+            const btn = candidates.nth(i);
+            try {
+              const box = await btn.boundingBox();
+              // [核心安全锁] 只要 Y > 100，就绝对不是右上角的按钮
+              if (box && box.y > 100) {
+                targetIndex = i;
+                // 打印日志方便调试，但只打印一次
+                if (!isClicking) {
+                  const text = (await btn.innerText())
+                    .replace(/\n/g, "")
+                    .substring(0, 10);
+                  this.logger.warn(
+                    `[Browser] 🎯 锁定目标 (Y=${Math.round(box.y)}): "${text}"`
+                  );
+                }
+                break;
+              }
+            } catch (e) {
+              /* 忽略过期的元素 */
             }
+          }
         }
 
         // --- 阶段二：战斗 (如果找到了目标) ---
         if (targetIndex !== -1) {
-            isClicking = true;
-            this.logger.info(`[Browser] (后台任务) 进入点击循环 (尝试消除 Launch 按钮)...`);
+          isClicking = true;
+          this.logger.info(
+            `[Browser] (后台任务) 进入点击循环 (尝试消除 Launch 按钮)...`
+          );
 
-            // 暴力循环 20 次，直到按钮消失
-            for (let attempt = 0; attempt < 20; attempt++) {
-                if (!this.page || this.page.isClosed()) break;
+          // 暴力循环 20 次，直到按钮消失
+          for (let attempt = 0; attempt < 20; attempt++) {
+            if (!this.page || this.page.isClosed()) break;
 
-                // [关键差异点]：每次循环都重新定位 nth(targetIndex)
-                // 这能解决 "Stale Element" 问题
-                const currentBtn = candidates.nth(targetIndex);
+            // [关键差异点]：每次循环都重新定位 nth(targetIndex)
+            // 这能解决 "Stale Element" 问题
+            const currentBtn = candidates.nth(targetIndex);
 
-                // 1. 再次确认它还在，且位置正确 (防止页面跳动导致误触)
-                try {
-                    const box = await currentBtn.boundingBox();
-                    if (!box) {
-                        this.logger.info('[Browser] ✅ 按钮已消失，任务完成。');
-                        isClicking = false;
-                        break; 
-                    }
-                    if (box.y < 80) {
-                        this.logger.warn('[Browser] ⚠️ 目标位置异常上移，放弃点击以防误触。');
-                        break;
-                    }
+            // 1. 再次确认它还在，且位置正确 (防止页面跳动导致误触)
+            try {
+              const box = await currentBtn.boundingBox();
+              if (!box) {
+                this.logger.info("[Browser] ✅ 按钮已消失，任务完成。");
+                isClicking = false;
+                break;
+              }
+              if (box.y < 80) {
+                this.logger.warn(
+                  "[Browser] ⚠️ 目标位置异常上移，放弃点击以防误触。"
+                );
+                break;
+              }
 
-                    // 2. 顺手清理遮罩 (Got it / backdrop)
-                    try {
-                        const gotIt = this.page.locator('button:has-text("Got it")').first();
-                        if (await gotIt.isVisible({ timeout: 50 })) await gotIt.click({ force: true });
-                        await this.page.evaluate(() => {
-                             document.querySelectorAll('.cdk-overlay-backdrop').forEach(el => el.remove());
-                        }).catch(() => {});
-                    } catch(e) {}
+              // 2. 顺手清理遮罩 (Got it / backdrop)
+              try {
+                const gotIt = this.page
+                  .locator('button:has-text("Got it")')
+                  .first();
+                if (await gotIt.isVisible({ timeout: 50 }))
+                  await gotIt.click({ force: true });
+                await this.page
+                  .evaluate(() => {
+                    document
+                      .querySelectorAll(".cdk-overlay-backdrop")
+                      .forEach((el) => el.remove());
+                  })
+                  .catch(() => {});
+              } catch (e) {}
 
-                    // 3. 执行点击
-                    // force: true 穿透遮罩
-                    // noWaitAfter: true 防止脚本卡在等待导航上
-                    await currentBtn.click({ force: true, timeout: 1000, noWaitAfter: true });
-                    
-                    // 4. 等待页面反应
-                    await new Promise(r => setTimeout(r, 1000));
+              // 3. 执行点击
+              // force: true 穿透遮罩
+              // noWaitAfter: true 防止脚本卡在等待导航上
+              await currentBtn.click({
+                force: true,
+                timeout: 1000,
+                noWaitAfter: true,
+              });
 
-                } catch (e) {
-                    // 如果点击报错，说明按钮可能刚好消失了，这是好事
-                    if (!e.message.includes('Timeout')) {
-                         this.logger.info('[Browser] ✅ 点击导致元素失效(成功)，退出循环。');
-                         isClicking = false;
-                         break;
-                    }
-                }
+              // 4. 等待页面反应
+              await new Promise((r) => setTimeout(r, 1000));
+            } catch (e) {
+              // 如果点击报错，说明按钮可能刚好消失了，这是好事
+              if (!e.message.includes("Timeout")) {
+                this.logger.info(
+                  "[Browser] ✅ 点击导致元素失效(成功)，退出循环。"
+                );
+                isClicking = false;
+                break;
+              }
             }
-            isClicking = false;
+          }
+          isClicking = false;
         }
-
       } catch (e) {
-         // 外层捕获，防止崩服务
+        // 外层捕获，防止崩服务
       }
 
       // 每次大循环休息 3 秒
       await new Promise((r) => setTimeout(r, 3000));
+    }
+
+    this.logger.info("[Browser] (后台任务) 页面已关闭，守护结束。");
+  }
 }
 
 // ===================================================================================
