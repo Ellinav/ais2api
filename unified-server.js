@@ -2838,7 +2838,17 @@ class ProxyServerSystem extends EventEmitter {
 
     app.use(this._createAuthMiddleware());
 
-    app.get("/v1/models", (req, res) => {
+    app.get("/v1/models", async (req, res) => {
+      try {
+        // 注意：这里需要通过 this 访问 requestHandler 或 browserManager
+        // 建议直接调用 browserManager，或者通过 requestHandler 调用
+        if (this.browserManager) {
+          await this.browserManager.tryDismissLaunchButton();
+        }
+      } catch (e) {
+        this.logger.warn(`[Models] 尝试消除 Launch 按钮失败: ${e.message}`);
+      }
+
       const modelIds = this.config.modelList || ["gemini-2.5-pro"];
 
       const models = modelIds.map((id) => ({
