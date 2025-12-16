@@ -521,7 +521,7 @@ class BrowserManager {
       this.logger.info(`✅ [Browser] 账号 ${authIndex} 的上下文初始化成功！`);
       this.logger.info("✅ [Browser] 浏览器客户端已准备就绪。");
       this.logger.info("==================================================");
-      this._runGuardianBurst(20000);
+      this._startBackgroundWakeup();
     } catch (error) {
       this.logger.error(
         `❌ [Browser] 账户 ${authIndex} 的上下文初始化失败: ${error.message}`
@@ -555,118 +555,119 @@ class BrowserManager {
     );
   }
 
-  // 1. 外部接口：供 RequestHandler 在收到请求时调用
-  triggerWakeup() {
-    // 如果已经在进行突发扫描，就不重复触发，避免重叠
-    if (this._isGuardianRunning) return;
+  async _startBackgroundWakeup() {
+    const currentPage = this.page;
+    // 1. 启动缓冲
+    await new Promise((r) => setTimeout(r, 1000));
+
+    if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
+      return;
 
     this.logger.info(
-      "[Browser] ⚡ 收到请求信号，激活 '突发守护模式' (持续扫描 10秒)..."
-    );
-    this._runGuardianBurst(10000); // 持续扫描 10 秒，足以覆盖加载延迟
-  }
-
-  // 2. 内部逻辑：执行短时间的密集扫描
-  async _runGuardianBurst(durationMs) {
-    if (this._isGuardianRunning) return;
-    this._isGuardianRunning = true;
-
-    const startTime = Date.now();
-    this.logger.info(
-      `[Browser] 🛡️ 启动社区版强力守护 (策略: Force Click + 1s Delay)...`
+      "[Browser] (后台任务) 🛡️ V8 引擎启动：主动唤醒 + 瞬时定位 + 沉浸式点击"
     );
 
-    try {
-      while (Date.now() - startTime < durationMs) {
-        if (!this.page || this.page.isClosed()) break;
+    while (
+      currentPage &&
+      !currentPage.isClosed() &&
+      this.page === currentPage
+    ) {
+      try {
+        // --- [关键] 步骤 1: 强制唤醒页面 ---
+        // 模拟用户切回这个标签页，强制 Chrome 提升渲染优先级
+        // 只要这一步执行了，效果就等同于你发送了 /models 请求
+        await currentPage.bringToFront().catch(() => {});
 
-        // 步骤1: 获取目标元素的句柄 (Handle)
-        // 我们不只获取坐标，而是获取这个 DOM 元素本身，这样才能用 .click({ force: true })
-        const elementHandle = await this.page.evaluateHandle(() => {
-          // 顺手点一下 Got it (无阻塞)
-          const gotIt = Array.from(document.querySelectorAll("button")).find(
-            (b) => b.innerText.includes("Got it")
-          );
-          if (gotIt) gotIt.click();
-
-          // 寻找目标
+        // --- 步骤 2: 极速查找 (在浏览器内部完成，0延迟) ---
+        // 我们不传回 elementHandle，只传回坐标 {x, y}，这样最快
+        const targetInfo = await currentPage.evaluate(() => {
+          // 扫描所有可能的文本容器
           const candidates = Array.from(
-            document.querySelectorAll(
-              'button, span, div[role="button"], mat-icon'
-            )
+            document.querySelectorAll('button, span, div[role="button"], a')
           );
 
-          return candidates.find((el) => {
+          for (const el of candidates) {
+            // 1. 文本匹配 (宽松模式)
             const text = el.innerText || "";
-            // 必须匹配文本
-            if (!/Launch|rocket_launch/i.test(text)) return false;
+            if (!/Launch|rocket_launch/i.test(text)) continue;
 
-            // 必须在安全区域 (Y > 300) 防止点到顶栏
+            // 2. 坐标与可见性检查
             const rect = el.getBoundingClientRect();
-            return (
-              rect.width > 0 &&
-              rect.height > 0 &&
-              rect.top > 300 &&
-              rect.top < 900
-            );
-          });
+            if (rect.width === 0 || rect.height === 0) continue;
+
+            // 3. 安全区锁定 (Y: 400 - 800)
+            // 完美避开右上角 (Y < 100)
+            if (rect.top > 400 && rect.top < 800) {
+              return {
+                found: true,
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+                text: text.substring(0, 10), // 只取前几个字用于日志
+              };
+            }
+          }
+          return { found: false };
         });
 
-        // 步骤2: 检查是否找到了元素
-        // elementHandle 永远是一个 JSHandle，需要判断它内部是不是 null
-        const isElementFound = await elementHandle.evaluate((node) => !!node);
-
-        if (isElementFound) {
+        // --- 步骤 3: 物理操作 ---
+        if (targetInfo.found) {
           this.logger.info(
-            `[Browser] 🎯 发现目标，执行 force: true 强力点击...`
+            `[Browser] 🎯 瞬时锁定 "${targetInfo.text}" @ ${Math.round(
+              targetInfo.x
+            )},${Math.round(targetInfo.y)} - 执行沉浸式点击...`
           );
 
-          try {
-            // --- 社区方案核心 ---
-            // force: true -> 无视遮罩层，强制触发点击
-            // timeout: 1000 -> 如果1秒点不下去就报错重试，别卡着
-            await elementHandle.click({ force: true, timeout: 1000 });
+          // A. 移动鼠标到目标
+          await currentPage.mouse.move(targetInfo.x, targetInfo.y);
 
-            this.logger.info(`[Browser] 🖱️ 点击已发送，等待 1秒 让页面反应...`);
-            // --- 关键等待 ---
-            await this.page.waitForTimeout(1000);
+          // B. [关键] 悬停 200ms (触发 hover 状态，很多按钮需要 hover 才能点)
+          await new Promise((r) => setTimeout(r, 200));
 
-            // 验证是否消失 (如果元素脱离文档流/被销毁，evaluate 会报错或返回 false)
-            const stillExists = await elementHandle
-              .evaluate((node) => {
-                const r = node.getBoundingClientRect();
-                return (
-                  r.width > 0 && r.height > 0 && document.body.contains(node)
-                );
-              })
-              .catch(() => false);
+          // C. 按下鼠标
+          await currentPage.mouse.down();
 
-            if (!stillExists) {
-              this.logger.info(`[Browser] ✅ 成功！目标已消失，守护任务完成。`);
-              await elementHandle.dispose().catch(() => {});
-              break;
-            } else {
-              this.logger.warn(`[Browser] ⚠️ 按钮仍在，准备进行下一轮尝试...`);
-            }
-          } catch (err) {
+          // D. [关键] 保持按下 300ms (防止点击太快，卡顿的页面没接收到)
+          await new Promise((r) => setTimeout(r, 300));
+
+          // E. 抬起鼠标
+          await currentPage.mouse.up();
+
+          this.logger.info(`[Browser] 🖱️ 点击动作完成，等待页面响应...`);
+
+          // 点击后等待 2 秒，给页面反应时间
+          await new Promise((r) => setTimeout(r, 2000));
+
+          // 再次检查是否消失 (使用同样的 evaluate 逻辑)
+          const stillThere = await currentPage.evaluate(() => {
+            const candidates = Array.from(
+              document.querySelectorAll('button, span, div[role="button"]')
+            );
+            return candidates.some((el) => {
+              const t = el.innerText || "";
+              const r = el.getBoundingClientRect();
+              return (
+                /Launch|rocket_launch/i.test(t) && r.top > 400 && r.height > 0
+              );
+            });
+          });
+
+          if (!stillThere) {
+            this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失，进入休眠。`);
+            await new Promise((r) => setTimeout(r, 30000));
+          } else {
             this.logger.warn(
-              `[Browser] 点击动作异常 (可能元素已动态变化): ${err.message}`
+              `[Browser] ⚠️ 按钮依然存在，可能是页面卡顿，准备重试...`
             );
           }
         } else {
-          // 没找到目标，稍微休息一下再找，避免 CPU 爆炸
-          await this.page.waitForTimeout(500);
+          // 没找到目标
+          // [关键] 稍微动一下鼠标 (0,0)，防止页面认为用户离开了
+          await currentPage.mouse.move(0, 0).catch(() => {});
+          await new Promise((r) => setTimeout(r, 1000));
         }
-
-        // 释放句柄防止内存泄漏
-        await elementHandle.dispose().catch(() => {});
-      }
-    } catch (e) {
-      this.logger.error(`[Browser] 守护进程发生异常: ${e.message}`);
-    } finally {
-      this._isGuardianRunning = false;
-      if (Date.now() - startTime >= durationMs) {
-        this.logger.info(`[Browser] 🛑 守护模式时间片耗尽，停止扫描。`);
+      } catch (e) {
+        // 忽略页面刷新期间的错误
+        await new Promise((r) => setTimeout(r, 1000));
       }
     }
   }
@@ -1116,7 +1117,6 @@ class RequestHandler {
         this._cancelBrowserRequest(requestId);
       }
     });
-    this.browserManager.triggerWakeup();
 
     if (!this.connectionRegistry.hasActiveConnections()) {
       if (this.isSystemBusy) {
@@ -1225,7 +1225,6 @@ class RequestHandler {
 
   async processOpenAIRequest(req, res) {
     const requestId = this._generateRequestId();
-    this.browserManager.triggerWakeup();
     const isOpenAIStream = req.body.stream === true;
     const model = req.body.model || "gemini-1.5-pro-latest";
     const systemStreamMode = this.serverSystem.streamingMode;
@@ -2887,7 +2886,6 @@ class ProxyServerSystem extends EventEmitter {
     app.use(this._createAuthMiddleware());
 
     app.get("/v1/models", (req, res) => {
-      this.browserManager.triggerWakeup();
       const modelIds = this.config.modelList || ["gemini-2.5-pro"];
 
       const models = modelIds.map((id) => ({
