@@ -554,132 +554,121 @@ class BrowserManager {
       `✅ [Browser] 账号切换完成，当前账号: ${this.currentAuthIndex}`
     );
   }
-  async _startBackgroundWakeup() {
+  
+async _startBackgroundWakeup() {
     // 1. 启动缓冲
     await new Promise((r) => setTimeout(r, 5000));
 
     if (!this.page || this.page.isClosed()) return;
 
     this.logger.info(
-      "[Browser] (后台任务) 🛡️ 已启动永久守护模式：每 5 秒监测一次 Launch 按钮..."
+      "[Browser] (后台任务) 🛡️ 已启动永久守护模式：智能识别并点击 Launch..."
     );
 
-    // 状态标记，防止重复打印无用日志
-    let lastLogTime = 0;
+    // 状态标记，防止日志刷屏
+    let isClicking = false;
 
     while (this.page && !this.page.isClosed()) {
-      // --- 第一层防线：页面存活检查 ---
-      if (!this.page) break;
-
       try {
-        // [修改点1] 扩大搜索范围，不仅找 button，也找可能是按钮的 div/span/a
-        // 关键词覆盖：Launch (文字), rocket_launch (图标代码)
+        // --- 阶段一：扫描 ---
+        if (!this.page) break;
+
+        // 1. 查找所有可能的按钮（包含图标 rocket_launch 或文字 Launch）
+        // 范围扩大到 button, div, span, a, 且不区分大小写
         const candidates = this.page
-          .locator('button, a, div[role="button"], span')
+          .locator('button, div[role="button"], span, a')
           .filter({ hasText: /Launch|rocket_launch/i });
 
         let count = 0;
         try {
           count = await candidates.count();
         } catch (e) {
-          // 忽略计数错误
+          // 页面可能刷新中，忽略
         }
 
-        if (count > 0 && Date.now() - lastLogTime > 10000) {
-             // 只有发现疑似目标时才打印，且每10秒最多打一次，防止刷屏
-             this.logger.info(`[Browser] (后台任务) 扫描到 ${count} 个疑似 Launch 元素，开始分析坐标...`);
-             lastLogTime = Date.now();
-        }
+        // 2. 寻找“位于页面中部”的那个唯一真神
+        let targetIndex = -1;
 
-        let realLaunchBtn = null;
-
-        for (let i = 0; i < count; i++) {
-          const btn = candidates.nth(i);
-          try {
-            // 获取位置信息
-            const box = await btn.boundingBox();
-            if (!box) continue;
-
-            // 获取文本用于调试（不再用于核心判断逻辑）
-            const text = (await btn.innerText()).replace(/\n/g, ' ').trim();
-
-            // [调试日志] 打印每个发现的按钮位置，帮你“看见”页面
-            // this.logger.info(`[Debug] 发现元素 #${i}: Text="${text.substring(0, 20)}...", Y=${Math.round(box.y)}, X=${Math.round(box.x)}`);
-
-            // [核心修改点2] 坐标霸权逻辑
-            // 只要 Y 坐标大于 80 (避开顶部导航栏)，我们就认为它是正文区的按钮
-            // 此时不再过滤 "Deploy" 关键字，防止误杀中间的按钮
-            if (box.y > 80) { 
-              this.logger.info(`[Browser] ✅ 锁定目标按钮！(Y=${Math.round(box.y)} > 80) 内容: "${text.substring(0, 15)}..."`);
-              realLaunchBtn = btn;
-              break; // 找到第一个符合坐标条件的就退出
+        if (count > 0) {
+            for (let i = 0; i < count; i++) {
+                const btn = candidates.nth(i);
+                try {
+                    const box = await btn.boundingBox();
+                    // [核心安全锁] 只要 Y > 100，就绝对不是右上角的按钮
+                    if (box && box.y > 100) {
+                        targetIndex = i;
+                        // 打印日志方便调试，但只打印一次
+                        if (!isClicking) {
+                             const text = (await btn.innerText()).replace(/\n/g, '').substring(0, 10);
+                             this.logger.warn(`[Browser] 🎯 锁定目标 (Y=${Math.round(box.y)}): "${text}"`);
+                        }
+                        break; 
+                    }
+                } catch (e) { /* 忽略过期的元素 */ }
             }
-          } catch (e) {
-             // 元素可能在遍历过程中消失，忽略
-             break;
-          }
         }
 
-        // 3. 执行点击逻辑
-        if (realLaunchBtn) {
-          this.logger.warn(
-            "⚠️ [Browser] (后台任务) 准备点击 Launch 按钮..."
-          );
-          
-          // 先尝试清理可能存在的遮罩
-          try {
-             // 处理 "Got it"
-            const gotIt = this.page.locator('button:has-text("Got it")').first();
-            if (await gotIt.isVisible({ timeout: 100 })) await gotIt.click({ force: true });
-            
-            // 移除遮罩层
-            await this.page.evaluate(() => {
-              document.querySelectorAll(".cdk-overlay-backdrop").forEach((el) => el.remove());
-            }).catch(() => {});
-          } catch (e) {}
+        // --- 阶段二：战斗 (如果找到了目标) ---
+        if (targetIndex !== -1) {
+            isClicking = true;
+            this.logger.info(`[Browser] (后台任务) 进入点击循环 (尝试消除 Launch 按钮)...`);
 
-          // 暴力点击尝试
-          let clickAttempts = 0;
-          let clickedSuccess = false;
-          while (clickAttempts < 5) {
-            try {
+            // 暴力循环 20 次，直到按钮消失
+            for (let attempt = 0; attempt < 20; attempt++) {
                 if (!this.page || this.page.isClosed()) break;
-                
-                // 检查按钮是否还存在
-                if (!(await realLaunchBtn.isVisible({ timeout: 500 }))) {
-                  this.logger.info("[Browser] ✅ 按钮点击后消失，判定为成功。");
-                  clickedSuccess = true;
-                  break;
-                }
-                
-                // 强制点击
-                await realLaunchBtn.click({ force: true, timeout: 1000 });
-                await new Promise((r) => setTimeout(r, 1000));
-                clickAttempts++;
-            } catch(e) {
-                // 如果报错且不是超时，可能是元素被卸载了（也算成功）
-                if (!e.message.includes('Timeout')) {
-                    clickedSuccess = true;
-                    break; 
+
+                // [关键差异点]：每次循环都重新定位 nth(targetIndex)
+                // 这能解决 "Stale Element" 问题
+                const currentBtn = candidates.nth(targetIndex);
+
+                // 1. 再次确认它还在，且位置正确 (防止页面跳动导致误触)
+                try {
+                    const box = await currentBtn.boundingBox();
+                    if (!box) {
+                        this.logger.info('[Browser] ✅ 按钮已消失，任务完成。');
+                        isClicking = false;
+                        break; 
+                    }
+                    if (box.y < 80) {
+                        this.logger.warn('[Browser] ⚠️ 目标位置异常上移，放弃点击以防误触。');
+                        break;
+                    }
+
+                    // 2. 顺手清理遮罩 (Got it / backdrop)
+                    try {
+                        const gotIt = this.page.locator('button:has-text("Got it")').first();
+                        if (await gotIt.isVisible({ timeout: 50 })) await gotIt.click({ force: true });
+                        await this.page.evaluate(() => {
+                             document.querySelectorAll('.cdk-overlay-backdrop').forEach(el => el.remove());
+                        }).catch(() => {});
+                    } catch(e) {}
+
+                    // 3. 执行点击
+                    // force: true 穿透遮罩
+                    // noWaitAfter: true 防止脚本卡在等待导航上
+                    await currentBtn.click({ force: true, timeout: 1000, noWaitAfter: true });
+                    
+                    // 4. 等待页面反应
+                    await new Promise(r => setTimeout(r, 1000));
+
+                } catch (e) {
+                    // 如果点击报错，说明按钮可能刚好消失了，这是好事
+                    if (!e.message.includes('Timeout')) {
+                         this.logger.info('[Browser] ✅ 点击导致元素失效(成功)，退出循环。');
+                         isClicking = false;
+                         break;
+                    }
                 }
             }
-          }
-          
-          if (clickedSuccess || clickAttempts >= 5) {
-              // 为了防止死循环点击同一个未消失的按钮，这里可以加个长等待
-              await new Promise((r) => setTimeout(r, 3000));
-          }
+            isClicking = false;
         }
-      } catch (e) {
-          // 捕获所有未知错误，防止崩溃
-      }
-      
-      // [关键修复] 放在 try-catch 外面的安全等待
-      await new Promise((r) => setTimeout(r, 5000));
-    }
 
-    this.logger.info("[Browser] (后台任务) 页面已关闭或重置，守护任务结束。");
-  }
+      } catch (e) {
+         // 外层捕获，防止崩服务
+      }
+
+      // 每次大循环休息 3 秒
+      await new Promise((r) => setTimeout(r, 3000));
 }
 
 // ===================================================================================
@@ -2953,5 +2942,3 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
-
-
