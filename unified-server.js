@@ -568,41 +568,62 @@ class BrowserManager {
 
   // 2. 内部逻辑：执行短时间的密集扫描
   async _runGuardianBurst(durationMs) {
+    // 防止重入
+    if (this._isGuardianRunning) return;
     this._isGuardianRunning = true;
+
     const currentPage = this.page;
     const startTime = Date.now();
+    let attemptCount = 0;
+
+    this.logger.info(
+      `[Browser] 🛡️ 突发守护模式启动 (预算: ${durationMs / 1000}秒)...`
+    );
 
     try {
       while (Date.now() - startTime < durationMs) {
-        if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
+        if (
+          !currentPage ||
+          currentPage.isClosed() ||
+          this.page !== currentPage
+        ) {
+          this.logger.warn("[Browser] 页面已关闭或上下文已切换，守护中止。");
           break;
+        }
+
+        attemptCount++;
 
         // --- 核心查找逻辑 (纯 JS 瞬时查找) ---
         const targetInfo = await currentPage.evaluate(() => {
+          // 优先查找 rocket_launch 图标或 Launch 文本
           const candidates = Array.from(
-            document.querySelectorAll('button, span, div[role="button"], a')
+            document.querySelectorAll(
+              'button, span, div[role="button"], a, mat-icon'
+            )
           );
+
           for (const el of candidates) {
             const text = el.innerText || "";
-            // 宽松匹配文本
+            // 匹配 rocket_launch (图标名) 或 Launch (文本)
             if (!/Launch|rocket_launch/i.test(text)) continue;
 
             const rect = el.getBoundingClientRect();
-            // 必须可见且在安全区 (Y: 400-800)
+            // 必须可见且在安全区 (Y: 400-900, 放宽一点范围)
             if (
               rect.width > 0 &&
               rect.height > 0 &&
-              rect.top > 400 &&
-              rect.top < 800
+              rect.top > 300 &&
+              rect.top < 700
             ) {
               return {
                 found: true,
                 x: rect.left + rect.width / 2,
                 y: rect.top + rect.height / 2,
-                text: text.substring(0, 10),
+                text: text.substring(0, 15),
               };
             }
           }
+
           // 顺手处理一下 Got it (无阻塞)
           const gotIt = Array.from(document.querySelectorAll("button")).find(
             (b) => b.innerText.includes("Got it")
@@ -615,58 +636,85 @@ class BrowserManager {
         // --- 命中处理 ---
         if (targetInfo.found) {
           this.logger.info(
-            `[Browser] 🎯 锁定目标 "${targetInfo.text}" @ ${Math.round(
-              targetInfo.x
-            )},${Math.round(targetInfo.y)} - 执行长按点击...`
+            `[Browser] 🎯 (第${attemptCount}次扫描) 锁定目标 "${
+              targetInfo.text
+            }" @ ${Math.round(targetInfo.x)},${Math.round(targetInfo.y)}`
           );
 
-          // === 强力点击流程 (针对卡顿环境优化) ===
-          // 1. 移动并悬停 (激活 hover 态)
-          await currentPage.mouse.move(targetInfo.x, targetInfo.y);
-          await new Promise((r) => setTimeout(r, 300));
+          // === 改进后的点击流程 ===
 
-          // 2. 按下
-          await currentPage.mouse.down();
-
-          // 3. [关键修改] 保持 800ms (延长按住时间)
-          await new Promise((r) => setTimeout(r, 800));
-
-          // 4. 抬起
-          await currentPage.mouse.up();
-
-          this.logger.info(`[Browser] 🖱️ 点击完成，等待 2秒 验证...`);
-          await new Promise((r) => setTimeout(r, 2000));
-
-          // 验证是否消失
-          const stillExists = await currentPage.evaluate(() => {
-            const els = Array.from(document.querySelectorAll("button, span"));
-            return els.some(
-              (el) =>
-                /Launch|rocket_launch/i.test(el.innerText) &&
-                el.getBoundingClientRect().top > 400
-            );
-          });
-
-          if (!stillExists) {
-            this.logger.info(
-              `[Browser] ✅ 唤醒成功！按钮已消失。守护任务提前结束。`
-            );
-            break; // 成功了就退出
-          } else {
-            this.logger.warn(
-              `[Browser] ⚠️ 按钮未消失，环境响应缓慢，准备重试...`
-            );
+          // 1. 标准鼠标点击 (模拟真人稍微一点点延迟，而不是长按)
+          try {
+            await currentPage.mouse.move(targetInfo.x, targetInfo.y);
+            await new Promise((r) => setTimeout(r, 100)); // 悬停一小会儿
+            await currentPage.mouse.click(targetInfo.x, targetInfo.y, {
+              delay: 50,
+            }); // 按下抬起间隔50ms
+          } catch (err) {
+            this.logger.warn(`[Browser] 鼠标点击失败: ${err.message}`);
           }
-        }
 
-        // 没找到或点击后，稍微等待一下再进行下一次扫描 (避免 CPU 爆炸)
-        await new Promise((r) => setTimeout(r, 500));
+          // 2. 智能等待验证 (最多等 1.5 秒，每 250ms 检查一次)
+          let clickedSuccess = false;
+          for (let k = 0; k < 6; k++) {
+            await new Promise((r) => setTimeout(r, 250));
+
+            const stillExists = await currentPage.evaluate(() => {
+              const els = Array.from(
+                document.querySelectorAll("button, span, mat-icon")
+              );
+              return els.some(
+                (el) =>
+                  /Launch|rocket_launch/i.test(el.innerText) &&
+                  el.getBoundingClientRect().top > 300
+              );
+            });
+
+            if (!stillExists) {
+              clickedSuccess = true;
+              break;
+            }
+          }
+
+          if (clickedSuccess) {
+            this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失。`);
+            break; // 成功退出
+          }
+
+          // 3. 如果鼠标点击无效，启用备用方案：JS 暴力点击
+          this.logger.warn(
+            `[Browser] ⚠️ 鼠标点击后按钮仍在，尝试 JS 强力点击...`
+          );
+          await currentPage.evaluate((info) => {
+            const el = document.elementFromPoint(info.x, info.y);
+            if (el) {
+              el.click(); // 原生 DOM 点击
+              // 如果里面包了按钮，尝试向上找父级点击
+              if (el.tagName !== "BUTTON") {
+                const btn = el.closest("button");
+                if (btn) btn.click();
+              }
+            }
+          }, targetInfo);
+
+          // JS点击后再等一小会儿
+          await new Promise((r) => setTimeout(r, 500));
+        } else {
+          // 如果这轮没找到，稍微多睡一会避免刷屏
+          // this.logger.debug(`[Browser] 扫描未发现目标...`);
+          await new Promise((r) => setTimeout(r, 800));
+        }
       }
     } catch (e) {
-      // 忽略错误
+      this.logger.error(`[Browser] 守护进程发生异常: ${e.message}`);
     } finally {
       this._isGuardianRunning = false;
-      // this.logger.info("[Browser] 突发守护模式已结束。");
+      // 只有当时间真的耗尽且没成功退出时，才打印这个，提示用户
+      if (Date.now() - startTime >= durationMs) {
+        this.logger.info(
+          `[Browser] 🛑 守护模式时间片(${durationMs}ms)耗尽，停止扫描。`
+        );
+      }
     }
   }
 }
