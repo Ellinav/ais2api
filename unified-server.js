@@ -521,7 +521,6 @@ class BrowserManager {
       this.logger.info(`✅ [Browser] 账号 ${authIndex} 的上下文初始化成功！`);
       this.logger.info("✅ [Browser] 浏览器客户端已准备就绪。");
       this.logger.info("==================================================");
-      this._startBackgroundWakeup();
     } catch (error) {
       this.logger.error(
         `❌ [Browser] 账户 ${authIndex} 的上下文初始化失败: ${error.message}`
@@ -555,120 +554,72 @@ class BrowserManager {
     );
   }
 
-  async _startBackgroundWakeup() {
+  async tryDismissLaunchButton() {
     const currentPage = this.page;
-    // 1. 启动缓冲
-    await new Promise((r) => setTimeout(r, 1000));
+    // 基础检查：页面必须存在且未关闭
+    if (!currentPage || currentPage.isClosed()) return;
 
-    if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
-      return;
+    try {
+      // 1. 强制唤醒：将页面置于前台，确保渲染优先级
+      await currentPage.bringToFront().catch(() => {});
 
-    this.logger.info(
-      "[Browser] (后台任务) 🛡️ V8 引擎启动：主动唤醒 + 瞬时定位 + 沉浸式点击"
-    );
+      // 2. 极速扫描：寻找符合 Y轴(400-800) 限制的 Launch 按钮
+      const targetInfo = await currentPage.evaluate(() => {
+        const candidates = Array.from(
+          document.querySelectorAll('button, span, div[role="button"], a')
+        );
 
-    while (
-      currentPage &&
-      !currentPage.isClosed() &&
-      this.page === currentPage
-    ) {
-      try {
-        // --- [关键] 步骤 1: 强制唤醒页面 ---
-        // 模拟用户切回这个标签页，强制 Chrome 提升渲染优先级
-        // 只要这一步执行了，效果就等同于你发送了 /models 请求
-        await currentPage.bringToFront().catch(() => {});
+        for (const el of candidates) {
+          const text = el.innerText || "";
+          // 匹配 Launch 或 rocket_launch 图标文本
+          if (!/Launch|rocket_launch/i.test(text)) continue;
 
-        // --- 步骤 2: 极速查找 (在浏览器内部完成，0延迟) ---
-        // 我们不传回 elementHandle，只传回坐标 {x, y}，这样最快
-        const targetInfo = await currentPage.evaluate(() => {
-          // 扫描所有可能的文本容器
-          const candidates = Array.from(
-            document.querySelectorAll('button, span, div[role="button"], a')
-          );
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) continue;
 
-          for (const el of candidates) {
-            // 1. 文本匹配 (宽松模式)
-            const text = el.innerText || "";
-            if (!/Launch|rocket_launch/i.test(text)) continue;
-
-            // 2. 坐标与可见性检查
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) continue;
-
-            // 3. 安全区锁定 (Y: 400 - 800)
-            // 完美避开右上角 (Y < 100)
-            if (rect.top > 400 && rect.top < 800) {
-              return {
-                found: true,
-                x: rect.left + rect.width / 2,
-                y: rect.top + rect.height / 2,
-                text: text.substring(0, 10), // 只取前几个字用于日志
-              };
-            }
+          // Y轴安全区锁定 (400 - 800)，避开右上角
+          if (rect.top > 400 && rect.top < 800) {
+            return {
+              found: true,
+              x: rect.left + rect.width / 2,
+              y: rect.top + rect.height / 2,
+              text: text.substring(0, 10),
+            };
           }
-          return { found: false };
-        });
-
-        // --- 步骤 3: 物理操作 ---
-        if (targetInfo.found) {
-          this.logger.info(
-            `[Browser] 🎯 瞬时锁定 "${targetInfo.text}" @ ${Math.round(
-              targetInfo.x
-            )},${Math.round(targetInfo.y)} - 执行沉浸式点击...`
-          );
-
-          // A. 移动鼠标到目标
-          await currentPage.mouse.move(targetInfo.x, targetInfo.y);
-
-          // B. [关键] 悬停 200ms (触发 hover 状态，很多按钮需要 hover 才能点)
-          await new Promise((r) => setTimeout(r, 200));
-
-          // C. 按下鼠标
-          await currentPage.mouse.down();
-
-          // D. [关键] 保持按下 300ms (防止点击太快，卡顿的页面没接收到)
-          await new Promise((r) => setTimeout(r, 300));
-
-          // E. 抬起鼠标
-          await currentPage.mouse.up();
-
-          this.logger.info(`[Browser] 🖱️ 点击动作完成，等待页面响应...`);
-
-          // 点击后等待 2 秒，给页面反应时间
-          await new Promise((r) => setTimeout(r, 2000));
-
-          // 再次检查是否消失 (使用同样的 evaluate 逻辑)
-          const stillThere = await currentPage.evaluate(() => {
-            const candidates = Array.from(
-              document.querySelectorAll('button, span, div[role="button"]')
-            );
-            return candidates.some((el) => {
-              const t = el.innerText || "";
-              const r = el.getBoundingClientRect();
-              return (
-                /Launch|rocket_launch/i.test(t) && r.top > 400 && r.height > 0
-              );
-            });
-          });
-
-          if (!stillThere) {
-            this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失，进入休眠。`);
-            await new Promise((r) => setTimeout(r, 30000));
-          } else {
-            this.logger.warn(
-              `[Browser] ⚠️ 按钮依然存在，可能是页面卡顿，准备重试...`
-            );
-          }
-        } else {
-          // 没找到目标
-          // [关键] 稍微动一下鼠标 (0,0)，防止页面认为用户离开了
-          await currentPage.mouse.move(0, 0).catch(() => {});
-          await new Promise((r) => setTimeout(r, 1000));
         }
-      } catch (e) {
-        // 忽略页面刷新期间的错误
-        await new Promise((r) => setTimeout(r, 1000));
+        return { found: false };
+      });
+
+      // 3. 如果发现目标，执行“沉浸式”点击
+      if (targetInfo.found) {
+        this.logger.info(
+          `[Browser] 🛡️ 请求前置检查：发现 "${targetInfo.text}" 按钮，正在清除...`
+        );
+
+        // A. 移动鼠标到目标
+        await currentPage.mouse.move(targetInfo.x, targetInfo.y);
+
+        // B. [关键调整] 增加悬停时间 (由200ms -> 500ms)
+        await new Promise((r) => setTimeout(r, 500));
+
+        // C. 按下鼠标
+        await currentPage.mouse.down();
+
+        // D. [关键调整] 增加按压时间 (由300ms -> 600ms)
+        await new Promise((r) => setTimeout(r, 600));
+
+        // E. 抬起鼠标
+        await currentPage.mouse.up();
+
+        this.logger.info(`[Browser] 🖱️ 点击完成，等待界面响应...`);
+
+        // F. 等待按钮消失或页面刷新 (1.5秒)
+        await new Promise((r) => setTimeout(r, 1500));
       }
+    } catch (e) {
+      this.logger.warn(
+        `[Browser] 尝试消除 Launch 按钮时出错 (非致命): ${e.message}`
+      );
     }
   }
 }
@@ -1186,6 +1137,7 @@ class RequestHandler {
     const wantsStream = wantsStreamByHeader || wantsStreamByPath;
 
     try {
+      await this.browserManager.tryDismissLaunchButton();
       if (wantsStream) {
         // --- 客户端想要流式响应 ---
         this.logger.info(
@@ -1269,6 +1221,7 @@ class RequestHandler {
     const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
 
     try {
+      await this.browserManager.tryDismissLaunchButton();
       this._forwardRequest(proxyRequest);
       const initialMessage = await messageQueue.dequeue();
 
