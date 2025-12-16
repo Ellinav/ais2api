@@ -564,15 +564,8 @@ class BrowserManager {
       return;
 
     this.logger.info(
-      "[Browser] (后台任务) 🛡️ 混合引擎 V6 启动：包含 SPAN 标签 + 坐标精准锁定"
+      "[Browser] (后台任务) 🛡️ V7 物理鼠标版启动：文本扫描 -> 坐标锁定 -> 鼠标点击"
     );
-
-    // [修正] 重新加入 'span' 标签，因为 Google 的按钮往往是 span 做的。
-    // 使用 Playwright 的 filter(hasText) 让引擎在底层先筛选一遍文本，减少传输量。
-    // 匹配规则：包含 "Launch" (中间按钮) 或者 "rocket_launch" (中间可能是图标，也可能是右上角)
-    const candidateLocator = currentPage
-      .locator('button, div[role="button"], a, span')
-      .filter({ hasText: /Launch|rocket_launch/i });
 
     while (
       currentPage &&
@@ -580,76 +573,84 @@ class BrowserManager {
       this.page === currentPage
     ) {
       try {
-        // --- 1. 顺手清理 "Got it" ---
-        // 同样加入 span 支持，防止漏掉
-        await currentPage
-          .locator('button:has-text("Got it"), span:has-text("Got it")')
-          .click({ timeout: 200, force: true })
-          .catch(() => {});
-
-        // --- 2. 核心逻辑：evaluateAll (极速筛选) ---
-        // Playwright 负责穿透 ShadowDOM 找到所有带 Launch 字样的元素
-        // 然后浏览器 JS 负责瞬间判断坐标
-        const result = await candidateLocator.evaluateAll((elements) => {
-          // === 浏览器内部执行，耗时 < 1ms ===
-
-          // 找到第一个符合 Y 轴安全区的元素
-          const target = elements.find((el) => {
-            // 获取精确坐标
-            const rect = el.getBoundingClientRect();
-
-            // [安全区逻辑]
-            // 右上角的 rocket_launch 按钮，rect.top 通常小于 100
-            // 中间的 Launch 按钮，rect.top 通常大于 400
-            const isSafeZone = rect.top > 400 && rect.top < 800;
-
-            // 确保元素可见 (宽、高 > 0)
-            const isVisible = rect.width > 0 && rect.height > 0;
-
-            return isSafeZone && isVisible;
-          });
-
-          if (target) {
-            target.click();
-            return {
-              clicked: true,
-              y: target.getBoundingClientRect().top,
-              text: target.innerText,
-            };
+        // --- 1. 顺手清理 "Got it" (使用最激进的策略) ---
+        // 只要看见 Got it 文本就点，不管它是什么标签
+        try {
+          const gotIt = currentPage.getByText("Got it").first();
+          if (await gotIt.isVisible({ timeout: 100 })) {
+            await gotIt.click({ force: true, noWaitAfter: true });
           }
-          return { clicked: false };
-        });
+        } catch (e) {}
 
-        // --- 3. 处理结果 ---
-        if (result.clicked) {
-          this.logger.info(
-            `[Browser] ⚡ 命中目标 "${result.text}" (Y=${Math.round(
-              result.y
-            )})，点击指令已执行。`
-          );
+        // --- 2. 核心查找：只找文本，不关心标签 (极速) ---
+        // 这样可以同时匹配 <button>Launch</button> 和 <span>rocket_launch</span>
+        const candidates = await currentPage
+          .getByText(/Launch|rocket_launch/i)
+          .all();
 
-          // 点击后等待 1 秒
-          await new Promise((r) => setTimeout(r, 1000));
+        let targetFound = false;
 
-          // 再次检查是否真的消失了 (确认点击有效)
-          const isStillThere = await candidateLocator.evaluateAll((list) =>
-            list.some(
-              (el) =>
-                el.getBoundingClientRect().top > 400 &&
-                el.getBoundingClientRect().height > 0
-            )
-          );
+        // --- 3. 遍历候选者 (通常页面上只有2-3个，循环极快) ---
+        for (const candidate of candidates) {
+          try {
+            // 必须可见
+            if (!(await candidate.isVisible({ timeout: 100 }))) continue;
 
-          if (!isStillThere) {
-            this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失，进入长休眠。`);
-            await new Promise((r) => setTimeout(r, 30000));
+            const box = await candidate.boundingBox();
+            if (!box) continue;
+
+            // [安全区判断] Y 轴必须在 400 到 800 之间
+            // 这能完美避开右上角的 rocket_launch (Y < 100)
+            if (box.y > 400 && box.y < 800) {
+              targetFound = true;
+
+              // 计算中心点
+              const x = box.x + box.width / 2;
+              const y = box.y + box.height / 2;
+
+              this.logger.info(
+                `[Browser] 🎯 锁定目标 (Text) @ ${Math.round(x)},${Math.round(
+                  y
+                )} - 正在执行物理点击...`
+              );
+
+              // --- 4. [核心] 物理鼠标点击 ---
+              // 不再信任 DOM 元素的 click()，直接操作鼠标
+              await currentPage.mouse.move(x, y);
+              await currentPage.mouse.down();
+              await new Promise((r) => setTimeout(r, 100)); // 模拟手指按下的短暂停留
+              await currentPage.mouse.up();
+
+              // 点击后，稍微等一下，不要疯狂连点
+              await new Promise((r) => setTimeout(r, 1000));
+
+              // 检查是否消失，如果消失了就退出
+              if (
+                !(await candidate
+                  .isVisible({ timeout: 500 })
+                  .catch(() => false))
+              ) {
+                this.logger.info(`[Browser] ✅ 物理点击生效！按钮已消失。`);
+                await new Promise((r) => setTimeout(r, 30000));
+                return; // 退出本次循环等待
+              } else {
+                this.logger.warn(`[Browser] ⚠️ 点击后按钮未消失，正在重试...`);
+              }
+
+              // 只要找到了一个符合条件的，处理完就跳出 candidates 循环，进入下一次大循环
+              break;
+            }
+          } catch (innerE) {
+            // 忽略单个元素在判断过程中的失效
           }
-        } else {
-          // 没找到（可能页面还在加载），稍微休息一下继续
+        }
+
+        if (!targetFound) {
+          // 如果没找到目标，短暂停顿避免 CPU 满载
           await new Promise((r) => setTimeout(r, 1000));
         }
       } catch (e) {
-        // 忽略刷新、切换瞬间的报错
+        // 忽略上下文丢失等错误
         await new Promise((r) => setTimeout(r, 1000));
       }
     }
