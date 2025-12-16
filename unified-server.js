@@ -556,89 +556,110 @@ class BrowserManager {
   }
 
   async _startBackgroundWakeup() {
-    // 锁定当前页面实例 (防止账号切换后残留)
     const currentPage = this.page;
+    await new Promise((r) => setTimeout(r, 500));
 
-    // 1. 极速启动：只等 0.5 秒就开始干活
-    await new Promise((r) => setTimeout(r, 1500));
-
-    // 基础检查
+    // 基本检查
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
 
     this.logger.info(
-      "[Browser] (后台任务) 🛡️ 极速守护模式启动：锁定区间 400 < Y < 700"
+      "[Browser] (后台任务) ⚡ V7 注入式极速守护启动：浏览器内原生坐标计算"
     );
 
-    // [核心] 只要条件满足，这个 while 循环会一直运行，这就是“持续守护”
     while (
       currentPage &&
       !currentPage.isClosed() &&
       this.page === currentPage
     ) {
       try {
-        // --- 极速扫描 ---
-        // 使用 locator.all() 获取所有快照，内存更安全
-        const candidates = await currentPage
-          .locator('button, div[role="button"], span, a')
-          .filter({ hasText: /Launch|rocket_launch/i })
-          .all();
+        // --- 1. 注入式扫描 (核心提速点) ---
+        // 我们不再把元素列表拉回 Node.js 遍历，而是直接在浏览器内部找好给 Node.js
+        const targetHandle = await currentPage.evaluateHandle(() => {
+          // A. 获取所有疑似元素 (button, div[role=button], a, span)
+          const elements = Array.from(
+            document.querySelectorAll('button, div[role="button"], span, a')
+          );
 
-        let targetBtn = null;
+          // B. 浏览器内部遍历 (速度极快)
+          for (const el of elements) {
+            // 文本过滤
+            const text = el.innerText || "";
+            if (!/Launch|rocket_launch/i.test(text)) continue;
 
-        // 遍历所有嫌疑对象
-        for (const candidate of candidates) {
-          try {
-            const box = await candidate.boundingBox();
-            // [用户指定优化] 精确锁定 400 - 700 之间的元素
-            // 原来按钮在 573，这个区间非常稳
-            if (box && box.y > 400 && box.y < 700) {
-              targetBtn = candidate;
-              // 打印一下坐标确认
-              // this.logger.info(`[Debug] 锁定目标 Y=${Math.round(box.y)}`);
-              break; // 找到即停止
+            // 坐标过滤 (原生 API)
+            const rect = el.getBoundingClientRect();
+
+            // [条件] 必须在 400 - 700 之间，且高度大于0(可见)
+            if (rect.top > 400 && rect.top < 700 && rect.height > 0) {
+              return el; // 找到直接返回 DOM 节点
             }
-          } catch (e) {
-            /* 忽略元素动态变化导致的报错 */
           }
-        }
+          return null; // 没找到
+        });
 
-        // --- 极速点击 ---
-        if (targetBtn) {
-          this.logger.info(`[Browser] ⚡ 发现目标 (400 < Y < 700)，立即点击！`);
+        // --- 2. 极速点击 ---
+        // targetHandle 是一个指向浏览器 DOM 元素的引用
+        // asElement() 把它转为 Playwright 的 ElementHandle
+        const element = targetHandle.asElement();
 
-          // 1. 顺手点一下可能存在的 Got it (不等待它)
+        if (element) {
+          this.logger.info(
+            `[Browser] ⚡ 瞬时锁定目标 (浏览器内计算)，立即执行！`
+          );
+
+          // 处理 Got it (非阻塞)
           currentPage
             .locator('button:has-text("Got it")')
             .click({ force: true })
             .catch(() => {});
 
-          // 2. 直接点击目标
-          // noWaitAfter: true -> 不等待页面加载，点了就跑
-          // force: true -> 穿透遮罩
-          await targetBtn
-            .click({ force: true, noWaitAfter: true })
-            .catch(() => {});
+          // [核心修改] 使用原生 JS 点击
+          // 之前的 click() 是模拟鼠标行为，容易被遮挡或点不准
+          // evaluate(el => el.click()) 是直接触发 DOM 点击事件，最暴力、最有效
+          await element
+            .evaluate((el) => el.click())
+            .catch((e) => {
+              // 如果原生点击失败，回退到 Playwright 强力点击
+              return element.click({ force: true, noWaitAfter: true });
+            });
 
-          // 3. 点击后只给 1 秒反应时间
-          // 既然是守护模式，没点到下一次循环马上会补刀，所以不用死等
-          await new Promise((r) => setTimeout(r, 5000));
+          // 点击后等待 1 秒验证
+          await new Promise((r) => setTimeout(r, 1000));
 
-          // 检查是否成功消失
-          const isGone = await targetBtn.isHidden().catch(() => true);
+          // 检查是否消失 (需要在浏览器内检查，因为 element handle 可能已失效)
+          const isGone = await element
+            .evaluate((el) => {
+              const rect = el.getBoundingClientRect();
+              return (
+                rect.width === 0 ||
+                rect.height === 0 ||
+                !document.body.contains(el)
+              );
+            })
+            .catch(() => true); // 如果报错说明节点被移除了，也是成功
+
           if (isGone) {
             this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失。`);
-            // 成功后，守护线程进入长休眠 (30秒)
-            // 注意：这里没有 break，休眠完会继续下一轮 while 循环，保持守护
+            // 成功后冷却 30 秒
             await new Promise((r) => setTimeout(r, 30000));
+          } else {
+            this.logger.warn(
+              `[Browser] ⚠️ 点击已执行但按钮未消失，可能正在加载中...`
+            );
+            // 如果还在，多等一会儿 (2秒) 再重试，避免刷屏
+            await new Promise((r) => setTimeout(r, 2000));
           }
         } else {
-          // 没找到目标，说明可能已经启动了，或者还在加载
-          // 短暂休息 1 秒后继续扫描
-          await new Promise((r) => setTimeout(r, 5000));
+          // 没找到，休息 1 秒
+          await new Promise((r) => setTimeout(r, 1000));
         }
+
+        // 释放句柄，防止内存泄漏
+        if (targetHandle) await targetHandle.dispose().catch(() => {});
       } catch (e) {
-        // 忽略错误，保持高频扫描
+        // 忽略上下文丢失等错误
+        await new Promise((r) => setTimeout(r, 1000));
       }
     }
 
