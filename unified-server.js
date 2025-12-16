@@ -521,6 +521,7 @@ class BrowserManager {
       this.logger.info(`✅ [Browser] 账号 ${authIndex} 的上下文初始化成功！`);
       this.logger.info("✅ [Browser] 浏览器客户端已准备就绪。");
       this.logger.info("==================================================");
+      this._startBackgroundWakeup();
     } catch (error) {
       this.logger.error(
         `❌ [Browser] 账户 ${authIndex} 的上下文初始化失败: ${error.message}`
@@ -554,53 +555,202 @@ class BrowserManager {
     );
   }
 
-  async tryDismissLaunchButton() {
+  async _startBackgroundWakeup() {
     const currentPage = this.page;
-    if (!currentPage || currentPage.isClosed()) return;
+    // 1. 启动缓冲
+    await new Promise((r) => setTimeout(r, 1000));
 
-    try {
-      // 1. 强制唤醒页面
-      await currentPage.bringToFront().catch(() => {});
+    if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
+      return;
 
-      // 2. 扫描 Launch 按钮 (Y轴 400-800)
-      const targetInfo = await currentPage.evaluate(() => {
-        const candidates = Array.from(
-          document.querySelectorAll('button, span, div[role="button"], a')
-        );
-        for (const el of candidates) {
-          const text = el.innerText || "";
-          if (!/Launch|rocket_launch/i.test(text)) continue;
+    this.logger.info(
+      "[Browser] (后台任务) 🛡️ 增强版保活监控已启动：主动扰动 + 智能父级定位 + 混合双打点击"
+    );
 
-          const rect = el.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) continue;
+    let noButtonCount = 0;
 
-          if (rect.top > 400 && rect.top < 800) {
-            return {
-              found: true,
-              x: rect.left + rect.width / 2,
-              y: rect.top + rect.height / 2,
-              text: text.substring(0, 10),
-            };
+    while (
+      currentPage &&
+      !currentPage.isClosed() &&
+      this.page === currentPage
+    ) {
+      try {
+        // --- [增强步骤 1] 强制唤醒页面 (解决不发请求不刷新的问题) ---
+        await currentPage.bringToFront().catch(() => {});
+
+        // 关键：在无头模式下，仅仅 bringToFront 可能不够，需要伪造鼠标移动来触发渲染帧
+        // 随机在一个无害区域轻微晃动鼠标
+        await currentPage.mouse.move(10, 10);
+        await currentPage.mouse.move(20, 20);
+
+        // --- [增强步骤 2] 智能查找 (查找文本并向上锁定可交互父级) ---
+        const targetInfo = await currentPage.evaluate(() => {
+          // 定义 Y 轴安全区 (避免误触右上角)
+          const MIN_Y = 400;
+          const MAX_Y = 800;
+
+          // 辅助函数：判断元素是否可见且在区域内
+          const isValid = (rect) => {
+            return (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              rect.top > MIN_Y &&
+              rect.top < MAX_Y
+            );
+          };
+
+          // 扫描所有包含关键词的元素
+          // 使用 XPath 可能更精准，但 QuerySelectorAll 兼容性好
+          const candidates = Array.from(
+            document.querySelectorAll("button, span, div, a, i") // 加入 i 标签以防图标
+          );
+
+          for (const el of candidates) {
+            const text = (el.innerText || "").trim();
+            // 匹配 Launch 或 rocket_launch 图标名
+            if (!/Launch|rocket_launch/i.test(text)) continue;
+
+            let targetEl = el;
+            let rect = targetEl.getBoundingClientRect();
+
+            // [关键优化] 如果当前元素很小或是纯文本容器，尝试向上找 3 层父级
+            // 找到那个真正的 Button 或拥有 role="button" 的容器
+            let parentDepth = 0;
+            while (parentDepth < 3 && targetEl.parentElement) {
+              // 如果当前元素已经是 button 或者是大的 div，可能就是它
+              if (
+                targetEl.tagName === "BUTTON" ||
+                targetEl.getAttribute("role") === "button"
+              ) {
+                break;
+              }
+              // 否则看看父级
+              const parent = targetEl.parentElement;
+              const pRect = parent.getBoundingClientRect();
+              // 如果父级也在可视区，且大小合理，就暂定父级为目标（通常点击父级更稳）
+              if (isValid(pRect)) {
+                targetEl = parent;
+                rect = pRect;
+              }
+              parentDepth++;
+            }
+
+            // 最终检查
+            if (isValid(rect)) {
+              return {
+                found: true,
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+                tagName: targetEl.tagName,
+                text: text.substring(0, 15),
+                // 这里的 selector 仅用于日志，很难反向传回 playwright
+                className: targetEl.className,
+              };
+            }
           }
-        }
-        return { found: false };
-      });
+          return { found: false };
+        });
 
-      // 3. 发现则点击
-      if (targetInfo.found) {
-        this.logger.info(
-          `[Browser] 🛡️ 检测到 "${targetInfo.text}" 按钮，正在消除...`
-        );
-        await currentPage.mouse.move(targetInfo.x, targetInfo.y);
-        await new Promise((r) => setTimeout(r, 500)); // 悬停
-        await currentPage.mouse.down();
-        await new Promise((r) => setTimeout(r, 600)); // 长按
-        await currentPage.mouse.up();
-        this.logger.info(`[Browser] 🖱️ 点击完成，等待生效...`);
-        await new Promise((r) => setTimeout(r, 1500)); // 等待消失
+        // --- [增强步骤 3] 执行操作 ---
+        if (targetInfo.found) {
+          noButtonCount = 0; // 重置计数
+          this.logger.info(
+            `[Browser] 🎯 锁定目标 [${targetInfo.tagName}] "${
+              targetInfo.text
+            }" @ (${Math.round(targetInfo.x)}, ${Math.round(targetInfo.y)})`
+          );
+
+          // === 策略 A: 物理点击 (模拟真实鼠标) ===
+          // 1. 移动过去
+          await currentPage.mouse.move(targetInfo.x, targetInfo.y, {
+            steps: 5,
+          });
+          // 2. 悬停 (给 hover 样式一点反应时间)
+          await new Promise((r) => setTimeout(r, 300));
+          // 3. 按下
+          await currentPage.mouse.down();
+          // 4. 长按 (某些按钮防误触，需要按住一小会儿)
+          await new Promise((r) => setTimeout(r, 400));
+          // 5. 抬起
+          await currentPage.mouse.up();
+
+          this.logger.info(`[Browser] 🖱️ 物理点击已执行，验证结果...`);
+
+          // 等待 1.5 秒看效果
+          await new Promise((r) => setTimeout(r, 1500));
+
+          // === 策略 B: JS 补刀 (如果物理点击失败) ===
+          // 再次检查按钮是否还在原地
+          const isStillThere = await currentPage.evaluate(() => {
+            // 逻辑同上，简单检查
+            const allText = document.body.innerText;
+            // 简单粗暴检查页面可视区是否还有那个特定位置的文字
+            // 这里为了性能做简化：再次扫描元素
+            const els = Array.from(
+              document.querySelectorAll('button, span, div[role="button"]')
+            );
+            return els.some((el) => {
+              const r = el.getBoundingClientRect();
+              return (
+                /Launch|rocket_launch/i.test(el.innerText) &&
+                r.top > 400 &&
+                r.top < 800 &&
+                r.height > 0
+              );
+            });
+          });
+
+          if (isStillThere) {
+            this.logger.warn(
+              `[Browser] ⚠️ 物理点击似乎无效（按钮仍在），尝试 JS 强力点击...`
+            );
+
+            // 直接在浏览器内部触发 click 事件
+            await currentPage.evaluate(() => {
+              const MIN_Y = 400;
+              const MAX_Y = 800;
+              const candidates = Array.from(
+                document.querySelectorAll('button, span, div[role="button"]')
+              );
+              for (const el of candidates) {
+                const r = el.getBoundingClientRect();
+                if (
+                  /Launch|rocket_launch/i.test(el.innerText) &&
+                  r.top > MIN_Y &&
+                  r.top < MAX_Y
+                ) {
+                  // 尝试找到最近的 button 父级点击
+                  let target = el;
+                  if (target.closest("button"))
+                    target = target.closest("button");
+                  target.click(); // 原生 JS 点击
+                  console.log(
+                    "[ProxyClient] JS Click triggered on " + target.tagName
+                  );
+                  return true;
+                }
+              }
+            });
+            // 再等一会
+            await new Promise((r) => setTimeout(r, 2000));
+          } else {
+            this.logger.info(`[Browser] ✅ 物理点击成功，按钮已消失。`);
+            // 成功消除后，可以休眠久一点
+            await new Promise((r) => setTimeout(r, 5000));
+          }
+        } else {
+          // 没找到目标
+          noButtonCount++;
+          // 如果连续很多次没找到，说明页面很干净，可以降低检测频率（省CPU）
+          // 如果刚发完请求，可能需要高频检测
+          const sleepTime = noButtonCount > 20 ? 2000 : 500;
+          await new Promise((r) => setTimeout(r, sleepTime));
+        }
+      } catch (e) {
+        // 忽略页面刷新/上下文销毁期间的错误
+        // this.logger.debug(`[BackgroundLoop] Debug: ${e.message}`);
+        await new Promise((r) => setTimeout(r, 1000));
       }
-    } catch (e) {
-      this.logger.warn(`[Browser] 消除按钮尝试失败(非致命): ${e.message}`);
     }
   }
 }
@@ -1116,9 +1266,7 @@ class RequestHandler {
       req.headers.accept && req.headers.accept.includes("text/event-stream");
     const wantsStreamByPath = req.path.includes(":streamGenerateContent");
     const wantsStream = wantsStreamByHeader || wantsStreamByPath;
-    if (this.browserManager) {
-      await this.browserManager.tryDismissLaunchButton();
-    }
+
     try {
       if (wantsStream) {
         // --- 客户端想要流式响应 ---
@@ -2819,15 +2967,7 @@ class ProxyServerSystem extends EventEmitter {
 
     app.use(this._createAuthMiddleware());
 
-    app.get("/v1/models", async (req, res) => {
-      try {
-        if (this.browserManager) {
-          await this.browserManager.tryDismissLaunchButton();
-        }
-      } catch (e) {
-        this.logger.warn(`[Models] 消除按钮检查失败: ${e.message}`);
-      }
-
+    app.get("/v1/models", (req, res) => {
       const modelIds = this.config.modelList || ["gemini-2.5-pro"];
 
       const models = modelIds.map((id) => ({
