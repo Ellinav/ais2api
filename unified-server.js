@@ -555,108 +555,124 @@ class BrowserManager {
     );
   }
 
-  async _startBackgroundWakeup() {
+   async _startBackgroundWakeup() {
     // 1. 启动缓冲
     await new Promise((r) => setTimeout(r, 5000));
 
     if (!this.page || this.page.isClosed()) return;
 
     this.logger.info(
-      "[Browser] (后台任务) 🛡️ 已启动永久守护模式：每 5 秒监测一次 Launch 按钮..."
+      "[Browser] (后台任务) 🛡️ 已启动永久守护模式：智能监测 Launch 按钮..."
     );
 
-    // 修改点：使用 isActive 标记来辅助判断，防止 this.page 在循环中途变成 null
     while (this.page && !this.page.isClosed()) {
       try {
-        // --- 增加一行安全检查 ---
         if (!this.page) break;
 
+        // --- 第一部分：防御性处理突发弹窗 (Got it / Close) ---
+        // 这是为了防止运行几小时后突然出现的弹窗卡住页面
+        try {
+            // 查找所有可能的弹窗按钮
+            const dialogBtns = this.page.locator('button, div[role="button"]').filter({ hasText: /Got it|Close|Agree/i });
+            if (await dialogBtns.count() > 0) {
+                // 只有当它们可见时才点击
+                const btn = dialogBtns.first();
+                if (await btn.isVisible({ timeout: 200 })) {
+                    this.logger.info("[Browser] (后台任务) 发现干扰弹窗，正在关闭...");
+                    await btn.click({ force: true });
+                    // 简单的遮罩层清理
+                    await this.page.evaluate(() => {
+                        document.querySelectorAll(".cdk-overlay-backdrop").forEach(el => el.remove());
+                    }).catch(() => {});
+                }
+            }
+        } catch (e) {}
+
+        // --- 第二部分：核心 Launch 按钮点击逻辑 ---
+        
+        // 1. 查找页面上所有可能相关的按钮
+        // 我们查找含有 "Launch", "Run", "Start" 或图标 "rocket_launch" 的按钮
         const candidates = this.page
           .locator("button")
-          .filter({ hasText: /Launch|rocket_launch/ });
+          .filter({ hasText: /Launch|Run|Start|rocket_launch/i });
 
-        // 使用 try-catch 包裹 count，因为页面可能随时关闭
-        let count = 0;
-        try {
-          if ((await candidates.count()) === 0) {
-            // 如果没找到，直接进入等待
-            throw new Error("No buttons found");
-          }
-          count = await candidates.count();
-        } catch (e) {
-          // 没找到或报错，直接跳过本次循环，进入延时
-          await new Promise((r) => setTimeout(r, 5000));
-          continue;
-        }
+        const count = await candidates.count().catch(() => 0);
 
         let realLaunchBtn = null;
 
         for (let i = 0; i < count; i++) {
           const btn = candidates.nth(i);
-          // 再次安全检查
-          try {
-            const box = await btn.boundingBox();
-            if (!box) continue;
-            if (box.y > 80) {
-              const text = await btn.innerText();
-              if (!text.includes("Deploy")) {
+          
+          // 获取按钮的全部文本内容
+          const btnText = await btn.innerText().catch(() => "");
+          
+          // [关键逻辑 1] 严格排除右上角的“部署”按钮
+          // 右上角按钮通常包含 "Deploy" 或 "部署"
+          if (btnText.includes("Deploy") || btnText.includes("部署")) {
+             continue;
+          }
+
+          // [关键逻辑 2] 排除纯图标按钮
+          // 右上角的按钮可能 text 只有 "rocket_launch" (图标代码) 而没有人类可读文字
+          // 中间的 Launch 按钮通常会有 "Launch" 这个单词
+          // 如果文本完全等于 "rocket_launch" (去空格后)，说明它可能只是个图标按钮，跳过
+          if (btnText.trim() === "rocket_launch") {
+             continue;
+          }
+
+          // [关键逻辑 3] 必须包含实质性的启动动作词汇
+          // 只有当按钮包含明确的 "Launch", "Run" 或 "Start" 时才认为是目标
+          // (忽略大小写)
+          if (/Launch|Run|Start/i.test(btnText)) {
+             // 找到了！
+             // 额外的双重确认：确保它可见
+             if (await btn.isVisible().catch(() => false)) {
                 realLaunchBtn = btn;
+                this.logger.info(`[Browser] (后台任务) 锁定目标按钮，文本内容: "${btnText.replace(/\n/g, ' ')}"`);
                 break;
-              }
-            }
-          } catch (e) {
-            break;
-          } // 如果元素已失效，跳出内层循环
+             }
+          }
         }
 
-        // 3. 执行点击逻辑
+        // 3. 执行点击
         if (realLaunchBtn) {
           this.logger.warn(
-            "⚠️ [Browser] (后台任务) 监测到 Launch 按钮出现！准备点击..."
+            "⚠️ [Browser] (后台任务) 监测到 Launch 按钮！准备点击..."
           );
-          try {
-            const gotIt = this.page
-              .locator('button:has-text("Got it")')
-              .first();
-            if (await gotIt.isVisible({ timeout: 100 }))
-              await gotIt.click({ force: true });
-
-            // 安全执行 evaluate
-            await this.page
-              .evaluate(() => {
-                const overlays = document.querySelectorAll(
-                  ".cdk-overlay-backdrop"
-                );
-                if (overlays) overlays.forEach((el) => el.remove());
-              })
-              .catch(() => {});
-          } catch (e) {}
-
+          
           let clickAttempts = 0;
-          while (clickAttempts < 10) {
+          while (clickAttempts < 5) { // 尝试5次
             try {
-              // 再次检查页面存活
-              if (!this.page || this.page.isClosed()) break;
-
-              if (!(await realLaunchBtn.isVisible({ timeout: 200 }))) {
-                this.logger.info("[Browser] ✅ Launch 按钮已处理 (已消失)。");
-                break;
-              }
-              await realLaunchBtn.click({ force: true, timeout: 500 });
-              await new Promise((r) => setTimeout(r, 1000)); // 使用通用延时
-              clickAttempts++;
-            } catch (e) {
-              break; // 点击出错（如元素detached），跳出重试
+                if(!this.page || this.page.isClosed()) break;
+                
+                if (!(await realLaunchBtn.isVisible({ timeout: 200 }))) {
+                  this.logger.info("[Browser] ✅ Launch 按钮已处理 (已消失)。");
+                  break;
+                }
+                
+                // 尝试点击
+                await realLaunchBtn.click({ force: true, timeout: 1000 });
+                this.logger.info(`[Browser] (后台任务) 点击尝试 ${clickAttempts + 1} 完成`);
+                
+                await new Promise((r) => setTimeout(r, 1000));
+                clickAttempts++;
+            } catch(e) {
+                // 点击失败通常意味着元素被覆盖或消失了
+                break; 
             }
           }
         }
-      } catch (e) {}
 
+      } catch (e) {
+        // 忽略循环中的轻微错误，保持守护进程存活
+      }
+
+      // [防崩溃] 使用原生 Promise 等待，不依赖 page 对象
       await new Promise((r) => setTimeout(r, 5000));
     }
 
-    this.logger.info("[Browser] (后台任务) 页面已关闭或重置，守护任务结束。");
-  }
+    this.logger.info("[Browser] (后台任务) 页面已关闭，守护任务结束。");
+   }
 }
 
 // ===================================================================================
@@ -2930,3 +2946,4 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
+
