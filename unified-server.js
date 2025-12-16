@@ -559,166 +559,93 @@ class BrowserManager {
     // 锁定当前页面实例 (防止账号切换后残留)
     const currentPage = this.page;
 
-    // 1. 急速启动
+    // 1. 极速启动：只等 0.5 秒就开始干活
     await new Promise((r) => setTimeout(r, 1500));
 
+    // 基础检查
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
 
     this.logger.info(
-      "[Browser] (后台任务) 🛡️ 已启动永久守护模式：智能识别并点击 Launch..."
+      "[Browser] (后台任务) 🛡️ 极速守护模式启动：锁定区间 400 < Y < 700"
     );
 
+    // [核心] 只要条件满足，这个 while 循环会一直运行，这就是“持续守护”
     while (
       currentPage &&
       !currentPage.isClosed() &&
       this.page === currentPage
     ) {
-      // 默认大循环休息时间
-      let cooldownTime = 3000;
-
       try {
-        // --- 阶段一：扫描 ---
-        const candidates = currentPage
+        // --- 极速扫描 ---
+        // 使用 locator.all() 获取所有快照，内存更安全
+        const candidates = await currentPage
           .locator('button, div[role="button"], span, a')
-          .filter({ hasText: /Launch|rocket_launch/i });
+          .filter({ hasText: /Launch|rocket_launch/i })
+          .all();
 
-        let count = 0;
-        try {
-          count = await candidates.count();
-        } catch (e) {}
+        let targetBtn = null;
 
-        let targetIndex = -1;
-
-        if (count > 0) {
-          for (let i = 0; i < count; i++) {
-            const btn = candidates.nth(i);
-            try {
-              const box = await btn.boundingBox();
-              // Y > 100 确保不误触右上角
-              if (box && box.y > 100) {
-                targetIndex = i;
-                break;
-              }
-            } catch (e) {}
+        // 遍历所有嫌疑对象
+        for (const candidate of candidates) {
+          try {
+            const box = await candidate.boundingBox();
+            // [用户指定优化] 精确锁定 400 - 700 之间的元素
+            // 原来按钮在 573，这个区间非常稳
+            if (box && box.y > 400 && box.y < 700) {
+              targetBtn = candidate;
+              // 打印一下坐标确认
+              // this.logger.info(`[Debug] 锁定目标 Y=${Math.round(box.y)}`);
+              break; // 找到即停止
+            }
+          } catch (e) {
+            /* 忽略元素动态变化导致的报错 */
           }
         }
 
-        // --- 阶段二：执行“耐心”点击 ---
-        if (targetIndex !== -1) {
-          const currentBtn = candidates.nth(targetIndex);
-          let btnText = "Launch";
-          try {
-            btnText = (await currentBtn.innerText())
-              .replace(/\n/g, "")
-              .trim()
-              .substring(0, 15);
-          } catch (e) {}
+        // --- 极速点击 ---
+        if (targetBtn) {
+          this.logger.info(`[Browser] ⚡ 发现目标 (400 < Y < 700)，立即点击！`);
 
-          // 既然找到了，说明还没启动好，打印日志
-          this.logger.info(
-            `[Browser] 🎯 发现 "${btnText}" (Y>100)，尝试激活...`
-          );
+          // 1. 顺手点一下可能存在的 Got it (不等待它)
+          currentPage
+            .locator('button:has-text("Got it")')
+            .click({ force: true })
+            .catch(() => {});
 
-          let success = false;
+          // 2. 直接点击目标
+          // noWaitAfter: true -> 不等待页面加载，点了就跑
+          // force: true -> 穿透遮罩
+          await targetBtn
+            .click({ force: true, noWaitAfter: true })
+            .catch(() => {});
 
-          // [优化] 只尝试 3 次，但每次等待时间加长
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            if (
-              !currentPage ||
-              currentPage.isClosed() ||
-              this.page !== currentPage
-            )
-              break;
+          // 3. 点击后只给 1 秒反应时间
+          // 既然是守护模式，没点到下一次循环马上会补刀，所以不用死等
+          await new Promise((r) => setTimeout(r, 5000));
 
-            // 1. 检查是否存在
-            const isVisible = await currentBtn
-              .isVisible({ timeout: 200 })
-              .catch(() => false);
-            if (!isVisible) {
-              success = true;
-              break;
-            }
-
-            // 2. 检查 Loading 状态
-            const isDisabled = await currentBtn.isDisabled().catch(() => false);
-            const ariaDisabled = await currentBtn
-              .getAttribute("aria-disabled")
-              .catch(() => null);
-            if (isDisabled || ariaDisabled === "true") {
-              this.logger.info(
-                `[Browser] ⏳ 正在等待云端资源分配 (Attempt ${attempt})...`
-              );
-              await new Promise((r) => setTimeout(r, 5000)); // 纯等待
-              continue;
-            }
-
-            // 3. 清理遮罩
-            try {
-              const gotIt = currentPage
-                .locator('button:has-text("Got it")')
-                .first();
-              if (await gotIt.isVisible({ timeout: 50 }))
-                await gotIt.click({ force: true });
-            } catch (e) {}
-
-            // 4. 执行点击
-            try {
-              await currentBtn
-                .hover({ force: true, timeout: 500 })
-                .catch(() => {});
-              await new Promise((r) => setTimeout(r, 200));
-              await currentBtn.click({
-                force: true,
-                timeout: 1000,
-                noWaitAfter: true,
-              });
-
-              // 最后一次才尝试暴力 JS 点击
-              if (attempt === 3) {
-                await currentBtn.evaluate((b) => b.click()).catch(() => {});
-              }
-            } catch (e) {
-              if (!e.message.includes("Timeout")) {
-                success = true;
-                break;
-              }
-            }
-
-            // 5. [核心调整] 点击后等待 5 秒 (给冷启动更多时间)
-            // 这样 3 次尝试就能覆盖 15 秒的时间
-            await new Promise((r) => setTimeout(r, 5000));
-
-            // 6. 验证
-            const stillExists = await currentBtn
-              .isVisible({ timeout: 200 })
-              .catch(() => false);
-            if (!stillExists) {
-              success = true;
-              break;
-            }
+          // 检查是否成功消失
+          const isGone = await targetBtn.isHidden().catch(() => true);
+          if (isGone) {
+            this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失。`);
+            // 成功后，守护线程进入长休眠 (30秒)
+            // 注意：这里没有 break，休眠完会继续下一轮 while 循环，保持守护
+            await new Promise((r) => setTimeout(r, 30000));
           }
-
-          if (success) {
-            this.logger.info(`[Browser] ✅ 唤醒成功！应用已运行。`);
-            // 成功后，进入超长休眠，防止扫描到页面刷新时的残影
-            cooldownTime = 30000;
-          } else {
-            // 如果3次（15秒）后还在，说明是真正的顽固，或者冷启动特别慢
-            // 打印个日志，然后让大循环继续处理
-            this.logger.info(`[Browser] ⏳ 仍在启动中，将在下一轮继续检测...`);
-          }
+        } else {
+          // 没找到目标，说明可能已经启动了，或者还在加载
+          // 短暂休息 1 秒后继续扫描
+          await new Promise((r) => setTimeout(r, 5000));
         }
       } catch (e) {
-        // 忽略错误
+        // 忽略错误，保持高频扫描
       }
-
-      await new Promise((r) => setTimeout(r, cooldownTime));
     }
 
-    // 退出时只在特定情况打印日志
     if (this.page !== currentPage) {
-      // 切换账号时的静默退出，不打印日志，保持清爽
+      this.logger.info(
+        "[Browser] (后台任务) 检测到账号切换，旧守护任务已销毁。"
+      );
     }
   }
 }
