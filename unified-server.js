@@ -556,18 +556,23 @@ class BrowserManager {
   }
 
   async _startBackgroundWakeup() {
-    // 锁定当前页面实例 (防止账号切换后残留)
+    // 锁定当前页面实例
     const currentPage = this.page;
-
-    // 1. 快速启动缓冲
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 1000)); // 启动缓冲
 
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
 
     this.logger.info(
-      "[Browser] (后台任务) 🛡️ 极速守护模式启动 (Browser-Side Execution)"
+      "[Browser] (后台任务) 🛡️ 混合引擎守护启动：Locator 查找 -> 浏览器内瞬时筛选"
     );
+
+    // 定义选择器：虽然我们想避开 rocket_launch，但为了保险（万一中间按钮也是图标），
+    // 我们保持宽泛的选择，依靠 Y 轴坐标来做最终的安全网。
+    // 使用 Playwright Locator 可以穿透 Shadow DOM 并自动等待，解决了“找不到”的问题。
+    const candidateLocator = currentPage
+      .locator('button, div[role="button"], a')
+      .filter({ hasText: /Launch|rocket_launch/i });
 
     while (
       currentPage &&
@@ -575,84 +580,64 @@ class BrowserManager {
       this.page === currentPage
     ) {
       try {
-        // --- 步骤 1: 优先清理挡路的 "Got it" (借鉴别人的代码，直接点，不等待) ---
-        // 使用 evaluate 在浏览器内瞬间完成检查和点击，没有任何网络延迟
+        // --- 1. 顺手清理 "Got it" (无阻塞) ---
         await currentPage
-          .evaluate(() => {
-            const gotBtn = document.querySelector('button, div[role="button"]');
-            if (gotBtn && gotBtn.innerText.includes("Got it")) {
-              gotBtn.click();
-            }
-          })
+          .locator('button:has-text("Got it")')
+          .click({ timeout: 200 })
           .catch(() => {});
 
-        // --- 步骤 2: 核心唤醒逻辑 (在浏览器内部完成“查找+坐标筛选+点击”) ---
-        const actionResult = await currentPage.evaluate(() => {
-          // A. 获取所有可能是按钮的元素 (只获取 button 标签，范围更小更准)
-          const buttons = Array.from(document.querySelectorAll("button"));
+        // --- 2. 核心逻辑：evaluateAll ---
+        // Playwright 负责找到所有符合条件的元素（无论是在 ShadowDOM 还是哪里）
+        // 然后将它们组成的数组直接传给浏览器内部函数。
+        const result = await candidateLocator.evaluateAll((elements) => {
+          // === 这里面的代码在浏览器内运行，速度极快 ===
 
-          // B. 在浏览器内存中极速筛选
-          const target = buttons.find((b) => {
-            // 文本检查
-            const text = b.innerText || "";
-            if (!/Launch|rocket_launch/i.test(text)) return false;
-
-            // 坐标检查 (你的核心安全逻辑)
-            const rect = b.getBoundingClientRect();
-            const isVisible = rect.width > 0 && rect.height > 0;
-            // 范围锁定在 400 - 800 之间 (稍微放宽一点下限以防万一)
-            const inZone = rect.top > 400 && rect.top < 800;
-
-            return isVisible && inZone;
+          // 找到第一个符合 Y 轴安全区的元素
+          const target = elements.find((el) => {
+            const rect = el.getBoundingClientRect();
+            // 你的黄金安全区：Y > 400
+            // 即使右上角的 rocket_launch 被 locator 选中了，它的 rect.top 肯定 < 100，会被这里瞬间过滤掉
+            return rect.top > 400 && rect.top < 800 && rect.width > 0;
           });
 
-          // C. 找到直接点击
           if (target) {
+            // 找到即点击
             target.click();
-            return { clicked: true, y: target.getBoundingClientRect().top }; // 返回结果给 Node
+            return { clicked: true, y: target.getBoundingClientRect().top };
           }
           return { clicked: false };
         });
 
-        if (actionResult.clicked) {
+        // --- 3. 处理结果 ---
+        if (result.clicked) {
           this.logger.info(
-            `[Browser] ⚡ 极速命中目标 (Y=${Math.round(
-              actionResult.y
-            )})，已触发点击！`
+            `[Browser] ⚡ 命中目标 (Y=${Math.round(
+              result.y
+            )})，点击指令已发送。`
           );
 
-          // 点击后，高频检测该按钮是否消失 (借用别人的逻辑，确认点击有效)
-          // 等待 1 秒看效果
+          // 点击后等待 1 秒，检查是否消失
           await new Promise((r) => setTimeout(r, 1000));
 
-          // 再次检查是否真的消失了 (可选)
-          const stillExists = await currentPage.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll("button"));
-            return buttons.some(
-              (b) =>
-                /Launch|rocket_launch/i.test(b.innerText) &&
-                b.getBoundingClientRect().top > 400
-            );
-          });
+          // 再次快速检查（可选，用于确认）
+          const isStillThere = await candidateLocator.evaluateAll((list) =>
+            list.some((el) => el.getBoundingClientRect().top > 400)
+          );
 
-          if (!stillExists) {
-            this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失，进入长休眠。`);
-            await new Promise((r) => setTimeout(r, 30000)); // 成功后休眠 30 秒
+          if (!isStillThere) {
+            this.logger.info(
+              `[Browser] ✅ 唤醒成功！按钮已消失，任务完成，进入长休眠。`
+            );
+            await new Promise((r) => setTimeout(r, 30000));
           }
         } else {
-          // 没找到符合坐标的按钮，短暂休息后继续扫描
+          // 没找到（可能页面还在加载，或者确实没有按钮），稍微休息一下继续
           await new Promise((r) => setTimeout(r, 1000));
         }
       } catch (e) {
-        // 忽略上下文丢失等错误，保持循环
+        // 忽略刷新、切换瞬间的报错
         await new Promise((r) => setTimeout(r, 1000));
       }
-    }
-
-    if (this.page !== currentPage) {
-      this.logger.info(
-        "[Browser] (后台任务) 检测到账号切换，旧守护任务已销毁。"
-      );
     }
   }
 }
