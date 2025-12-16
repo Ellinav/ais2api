@@ -518,7 +518,7 @@ class BrowserManager {
       this.logger.info("[Browser] ✅ UI交互完成，脚本已开始运行。");
 
       this.logger.info(
-        "[Browser] ⚡ 正在发送主动唤醒请求 (/v1beta/models) 以触发 Launch 流程..."
+        "[Browser] ⚡ 正在发送主动唤醒请求以触发 Launch 流程..."
       );
       try {
         await this.page.evaluate(async () => {
@@ -585,12 +585,12 @@ class BrowserManager {
   async _startBackgroundWakeup() {
     const currentPage = this.page;
     // 1. 启动缓冲
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 1500));
 
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
 
-    this.logger.info("[Browser] (后台任务) 🛡️ 增强版保活监控已启动");
+    this.logger.info("[Browser] (后台任务) 🛡️ 网页保活监控已启动");
 
     let noButtonCount = 0;
 
@@ -768,7 +768,7 @@ class BrowserManager {
           noButtonCount++;
           // 如果连续很多次没找到，说明页面很干净，可以降低检测频率（省CPU）
           // 如果刚发完请求，可能需要高频检测
-          const sleepTime = noButtonCount > 20 ? 30000 : 1000;
+          const sleepTime = noButtonCount > 20 ? 30000 : 1500;
           await new Promise((r) => setTimeout(r, sleepTime));
         }
       } catch (e) {
