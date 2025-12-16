@@ -556,25 +556,31 @@ class BrowserManager {
   }
 
   async _startBackgroundWakeup() {
-    // 启动2s后，开始Launch守护模式
+    // 之后的逻辑只认这个 currentPage，不再读取 this.page
+    const currentPage = this.page;
     await new Promise((r) => setTimeout(r, 2000));
 
-    if (!this.page || this.page.isClosed()) return;
+    // 如果刚启动页面就没了，或者发生了切换(this.page不等于currentPage)，直接退出
+    if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
+      return;
 
     this.logger.info(
       "[Browser] (后台任务) 🛡️ 已启动永久守护模式：智能识别并点击 Launch..."
     );
+
     let isClicking = false;
 
-    while (this.page && !this.page.isClosed()) {
+    // 只有当 (1) 页面没关 (2) Manager管理的当前页面还是这个页面 时，才继续运行
+    while (
+      currentPage &&
+      !currentPage.isClosed() &&
+      this.page === currentPage
+    ) {
       let cooldownTime = 3000;
 
       try {
-        if (!this.page) break;
-
         // --- 阶段一：扫描 ---
-        // 查找所有可能的按钮
-        const candidates = this.page
+        const candidates = currentPage
           .locator('button, div[role="button"], span, a')
           .filter({ hasText: /Launch|rocket_launch/i });
 
@@ -585,13 +591,11 @@ class BrowserManager {
 
         let targetIndex = -1;
 
-        // 寻找符合坐标条件的按钮
         if (count > 0) {
           for (let i = 0; i < count; i++) {
             const btn = candidates.nth(i);
             try {
               const box = await btn.boundingBox();
-              // Y > 100 确保不误触右上角
               if (box && box.y > 100) {
                 targetIndex = i;
                 break;
@@ -614,16 +618,18 @@ class BrowserManager {
             `[Browser] 🎯 锁定目标: "${targetText}"，开始执行点击...`
           );
 
-          // [优化2] 减少循环次数，增加单次质量
-          // 尝试 10 次，每次间隔 1 秒
           let success = false;
-
           for (let attempt = 1; attempt <= 10; attempt++) {
-            if (!this.page || this.page.isClosed()) break;
+            // 循环内再次检查身份，防止在点击过程中切换账号
+            if (
+              !currentPage ||
+              currentPage.isClosed() ||
+              this.page !== currentPage
+            )
+              break;
 
             const currentBtn = candidates.nth(targetIndex);
 
-            // 1. 点击前检查
             const isVisible = await currentBtn
               .isVisible({ timeout: 200 })
               .catch(() => false);
@@ -632,35 +638,29 @@ class BrowserManager {
               break;
             }
 
-            // 2. 尝试清理遮罩
             try {
-              const gotIt = this.page
+              const gotIt = currentPage
                 .locator('button:has-text("Got it")')
                 .first();
               if (await gotIt.isVisible({ timeout: 50 }))
                 await gotIt.click({ force: true });
             } catch (e) {}
 
-            // 3. 执行点击
             try {
-              // force: true 穿透遮罩
               await currentBtn.click({
                 force: true,
                 timeout: 1000,
                 noWaitAfter: true,
               });
             } catch (e) {
-              // 点击报错（如元素被卸载）通常意味着成功
               if (!e.message.includes("Timeout")) {
                 success = true;
                 break;
               }
             }
 
-            // 4. [关键] 点击后等待并验证
             await new Promise((r) => setTimeout(r, 1000));
 
-            // 再次检查是否还存在
             const stillExists = await currentBtn
               .isVisible({ timeout: 200 })
               .catch(() => false);
@@ -670,10 +670,9 @@ class BrowserManager {
             }
           }
 
-          // 成功后的处理
           if (success) {
             this.logger.info(
-              `[Browser] ✅ 唤醒成功！Launch 按钮已消失，守护线程进入 30秒 冷却。`
+              `[Browser] ✅ 唤醒成功！Launch 按钮已消失，守护进程进入 30 秒 冷却。`
             );
             cooldownTime = 30000;
           } else {
@@ -681,14 +680,18 @@ class BrowserManager {
               `[Browser] ⚠️ 尝试点击多次后按钮仍未消失，稍后重试。`
             );
           }
-
           isClicking = false;
         }
       } catch (e) {}
       await new Promise((r) => setTimeout(r, cooldownTime));
     }
-
-    this.logger.info("[Browser] (后台任务) 守护结束。");
+    if (this.page !== currentPage) {
+      this.logger.info(
+        "[Browser] (后台任务) 检测到账号切换，旧的守护任务已自动销毁。"
+      );
+    } else {
+      this.logger.info("[Browser] (后台任务) 页面关闭，守护结束。");
+    }
   }
 }
 
