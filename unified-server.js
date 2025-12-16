@@ -203,8 +203,12 @@ class BrowserManager {
           "camoufox-linux",
           "camoufox"
         );
+      } else if (platform === "win32") {
+        this.browserExecutablePath =
+          "E:\\Backup\\AI\\API\\Proxy\\ais2api-main\\camoufox\\camoufox.exe";
       } else {
-        throw new Error(`Unsupported operating system: ${platform}`);
+        this.browserExecutablePath =
+          "E:\\Backup\\AI\\API\\Proxy\\ais2api-main\\camoufox\\camoufox.exe";
       }
     }
   }
@@ -218,7 +222,7 @@ class BrowserManager {
         );
       }
       this.browser = await firefox.launch({
-        headless: true,
+        headless: false,
         executablePath: this.browserExecutablePath,
         args: this.launchArgs,
       });
@@ -341,7 +345,7 @@ class BrowserManager {
       );
 
       const startTime = Date.now();
-      const timeLimit = 20000;
+      const timeLimit = 20000; // 20秒硬性限制
 
       // 状态记录表
       const popupStatus = {
@@ -351,7 +355,7 @@ class BrowserManager {
       };
 
       while (Date.now() - startTime < timeLimit) {
-        // 如果3个都处理过了，立刻退出 ---
+        // --- 核心判断：如果3个都处理过了，立刻退出 ---
         if (popupStatus.cookie && popupStatus.gotIt && popupStatus.guide) {
           this.logger.info(
             `[Browser] ⚡ 完美！3个弹窗全部处理完毕，提前进入下一步。`
@@ -520,16 +524,18 @@ class BrowserManager {
       this.logger.info("==================================================");
       this.logger.info(`✅ [Browser] 账号 ${authIndex} 的上下文初始化成功！`);
       this.logger.info("✅ [Browser] 浏览器客户端已准备就绪。");
-      this.logger.info("==================================================");
       this._startBackgroundWakeup();
+      this.logger.info("==================================================");
     } catch (error) {
       this.logger.error(
         `❌ [Browser] 账户 ${authIndex} 的上下文初始化失败: ${error.message}`
       );
-      if (this.browser) {
-        await this.browser.close();
-        this.browser = null;
-      }
+      // --- [修改 3] 暂时注释掉下面这几行，防止窗口闪退 ---
+      // if (this.browser) {
+      //   await this.browser.close();
+      //   this.browser = null;
+      // }
+      // -------------------------------------------------
       throw error;
     }
   }
@@ -564,29 +570,49 @@ class BrowserManager {
     this.logger.info(
       "[Browser] (后台任务) 🛡️ 已启动永久守护模式：每 5 秒监测一次 Launch 按钮..."
     );
+
+    // 修改点：使用 isActive 标记来辅助判断，防止 this.page 在循环中途变成 null
     while (this.page && !this.page.isClosed()) {
       try {
+        // --- 增加一行安全检查 ---
+        if (!this.page) break;
+
         const candidates = this.page
           .locator("button")
           .filter({ hasText: /Launch|rocket_launch/ });
-        if ((await candidates.count()) === 0) {
-          await this.page.waitForTimeout(5000);
+
+        // 使用 try-catch 包裹 count，因为页面可能随时关闭
+        let count = 0;
+        try {
+          if ((await candidates.count()) === 0) {
+            // 如果没找到，直接进入等待
+            throw new Error("No buttons found");
+          }
+          count = await candidates.count();
+        } catch (e) {
+          // 没找到或报错，直接跳过本次循环，进入延时
+          await new Promise((r) => setTimeout(r, 5000));
           continue;
         }
-        const count = await candidates.count();
+
         let realLaunchBtn = null;
 
         for (let i = 0; i < count; i++) {
           const btn = candidates.nth(i);
-          const box = await btn.boundingBox();
-          if (!box) continue;
-          if (box.y > 80) {
-            const text = await btn.innerText();
-            if (!text.includes("Deploy")) {
-              realLaunchBtn = btn;
-              break;
+          // 再次安全检查
+          try {
+            const box = await btn.boundingBox();
+            if (!box) continue;
+            if (box.y > 80) {
+              const text = await btn.innerText();
+              if (!text.includes("Deploy")) {
+                realLaunchBtn = btn;
+                break;
+              }
             }
-          }
+          } catch (e) {
+            break;
+          } // 如果元素已失效，跳出内层循环
         }
 
         // 3. 执行点击逻辑
@@ -600,29 +626,42 @@ class BrowserManager {
               .first();
             if (await gotIt.isVisible({ timeout: 100 }))
               await gotIt.click({ force: true });
-            await this.page.evaluate(() => {
-              document
-                .querySelectorAll(".cdk-overlay-backdrop")
-                .forEach((el) => el.remove());
-            });
+
+            // 安全执行 evaluate
+            await this.page
+              .evaluate(() => {
+                const overlays = document.querySelectorAll(
+                  ".cdk-overlay-backdrop"
+                );
+                if (overlays) overlays.forEach((el) => el.remove());
+              })
+              .catch(() => {});
           } catch (e) {}
 
           let clickAttempts = 0;
           while (clickAttempts < 10) {
-            if (!(await realLaunchBtn.isVisible({ timeout: 200 }))) {
-              this.logger.info("[Browser] ✅ Launch 按钮已处理 (已消失)。");
-              break;
+            try {
+              // 再次检查页面存活
+              if (!this.page || this.page.isClosed()) break;
+
+              if (!(await realLaunchBtn.isVisible({ timeout: 200 }))) {
+                this.logger.info("[Browser] ✅ Launch 按钮已处理 (已消失)。");
+                break;
+              }
+              await realLaunchBtn.click({ force: true, timeout: 500 });
+              await new Promise((r) => setTimeout(r, 1000)); // 使用通用延时
+              clickAttempts++;
+            } catch (e) {
+              break; // 点击出错（如元素detached），跳出重试
             }
-            await realLaunchBtn.click({ force: true, timeout: 500 });
-            await this.page.waitForTimeout(1000);
-            clickAttempts++;
           }
         }
       } catch (e) {}
-      await this.page.waitForTimeout(5000);
+
+      await new Promise((r) => setTimeout(r, 5000));
     }
 
-    this.logger.info("[Browser] (后台任务) 页面已关闭，守护任务结束。");
+    this.logger.info("[Browser] (后台任务) 页面已关闭或重置，守护任务结束。");
   }
 }
 
