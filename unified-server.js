@@ -556,11 +556,11 @@ class BrowserManager {
   }
 
   async _startBackgroundWakeup() {
-    // 之后的逻辑只认这个 currentPage，不再读取 this.page
     const currentPage = this.page;
+
+    // 1. 急速启动
     await new Promise((r) => setTimeout(r, 2000));
 
-    // 如果刚启动页面就没了，或者发生了切换(this.page不等于currentPage)，直接退出
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
 
@@ -570,7 +570,6 @@ class BrowserManager {
 
     let isClicking = false;
 
-    // 只有当 (1) 页面没关 (2) Manager管理的当前页面还是这个页面 时，才继续运行
     while (
       currentPage &&
       !currentPage.isClosed() &&
@@ -604,23 +603,28 @@ class BrowserManager {
           }
         }
 
-        // --- 阶段二：执行点击 ---
+        // --- 阶段二：执行精细点击 ---
         if (targetIndex !== -1) {
           isClicking = true;
-          let targetText = "Launch Button";
+          const currentBtn = candidates.nth(targetIndex);
+
+          // 获取按钮文字用于日志
+          let btnText = "Launch";
           try {
-            targetText = (await candidates.nth(targetIndex).innerText())
+            btnText = (await currentBtn.innerText())
               .replace(/\n/g, "")
-              .substring(0, 10);
+              .trim()
+              .substring(0, 15);
           } catch (e) {}
 
           this.logger.warn(
-            `[Browser] 🎯 锁定目标: "${targetText}"，开始执行点击...`
+            `[Browser] 🎯 锁定目标: "${btnText}" (Y>100)，准备执行点击...`
           );
 
+          // [优化逻辑] 减少循环次数 (5次)，增加单次等待时间 (3秒)
           let success = false;
-          for (let attempt = 1; attempt <= 10; attempt++) {
-            // 循环内再次检查身份，防止在点击过程中切换账号
+
+          for (let attempt = 1; attempt <= 5; attempt++) {
             if (
               !currentPage ||
               currentPage.isClosed() ||
@@ -628,8 +632,7 @@ class BrowserManager {
             )
               break;
 
-            const currentBtn = candidates.nth(targetIndex);
-
+            // 1. 检查是否存在
             const isVisible = await currentBtn
               .isVisible({ timeout: 200 })
               .catch(() => false);
@@ -638,6 +641,23 @@ class BrowserManager {
               break;
             }
 
+            // 2. 检查是否处于 Loading 或 Disabled 状态
+            // 如果按钮变灰了，说明正在加载，不要点，只要等
+            const isDisabled = await currentBtn.isDisabled().catch(() => false);
+            // 有些按钮不用 disabled 属性，而是加 class，这里简单判断一下 aria-disabled
+            const ariaDisabled = await currentBtn
+              .getAttribute("aria-disabled")
+              .catch(() => null);
+
+            if (isDisabled || ariaDisabled === "true") {
+              this.logger.info(
+                `[Browser] ⏳ 按钮处于加载/禁用状态，等待响应中... (Attempt ${attempt})`
+              );
+              await new Promise((r) => setTimeout(r, 3000));
+              continue;
+            }
+
+            // 3. 清理遮罩
             try {
               const gotIt = currentPage
                 .locator('button:has-text("Got it")')
@@ -646,12 +666,23 @@ class BrowserManager {
                 await gotIt.click({ force: true });
             } catch (e) {}
 
+            // 4. [优化] 组合拳点击：Hover -> Click
             try {
+              await currentBtn
+                .hover({ force: true, timeout: 500 })
+                .catch(() => {});
+              await new Promise((r) => setTimeout(r, 200));
               await currentBtn.click({
                 force: true,
                 timeout: 1000,
                 noWaitAfter: true,
               });
+
+              // 偶尔用 JS 点击补刀
+              if (attempt === 5) {
+                this.logger.info("[Browser] ⚠️ 尝试强制 JS 点击...");
+                await currentBtn.evaluate((b) => b.click()).catch(() => {});
+              }
             } catch (e) {
               if (!e.message.includes("Timeout")) {
                 success = true;
@@ -659,8 +690,10 @@ class BrowserManager {
               }
             }
 
-            await new Promise((r) => setTimeout(r, 1000));
+            // 5. [核心优化] 点击后等待 3 秒 (给服务器反应时间)
+            await new Promise((r) => setTimeout(r, 3000));
 
+            // 6. 再次验证
             const stillExists = await currentBtn
               .isVisible({ timeout: 200 })
               .catch(() => false);
@@ -676,21 +709,17 @@ class BrowserManager {
             );
             cooldownTime = 30000;
           } else {
-            this.logger.warn(
-              `[Browser] ⚠️ 尝试点击多次后按钮仍未消失，稍后重试。`
-            );
+            this.logger.warn(`[Browser] ⚠️ 按钮依然顽固，稍后进入下一轮扫描。`);
           }
           isClicking = false;
         }
       } catch (e) {}
+
       await new Promise((r) => setTimeout(r, cooldownTime));
     }
+
     if (this.page !== currentPage) {
-      this.logger.info(
-        "[Browser] (后台任务) 🛡️ 检测到账号切换，旧的守护任务已自动销毁。"
-      );
-    } else {
-      this.logger.info("[Browser] (后台任务) 🛡️ 页面关闭，守护结束。");
+      this.logger.info("[Browser] (后台任务) 检测到账号切换，旧守护任务销毁。");
     }
   }
 }
