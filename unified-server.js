@@ -203,12 +203,8 @@ class BrowserManager {
           "camoufox-linux",
           "camoufox"
         );
-      } else if (platform === "win32") {
-        this.browserExecutablePath =
-          "E:\\Backup\\AI\\API\\Proxy\\ais2api-main\\camoufox\\camoufox.exe";
       } else {
-        this.browserExecutablePath =
-          "E:\\Backup\\AI\\API\\Proxy\\ais2api-main\\camoufox\\camoufox.exe";
+        throw new Error(`Unsupported operating system: ${platform}`);
       }
     }
   }
@@ -222,7 +218,7 @@ class BrowserManager {
         );
       }
       this.browser = await firefox.launch({
-        headless: false,
+        headless: true,
         executablePath: this.browserExecutablePath,
         args: this.launchArgs,
       });
@@ -345,7 +341,7 @@ class BrowserManager {
       );
 
       const startTime = Date.now();
-      const timeLimit = 20000; // 20秒硬性限制
+      const timeLimit = 20000;
 
       // 状态记录表
       const popupStatus = {
@@ -355,7 +351,7 @@ class BrowserManager {
       };
 
       while (Date.now() - startTime < timeLimit) {
-        // --- 核心判断：如果3个都处理过了，立刻退出 ---
+        // 如果3个都处理过了，立刻退出 ---
         if (popupStatus.cookie && popupStatus.gotIt && popupStatus.guide) {
           this.logger.info(
             `[Browser] ⚡ 完美！3个弹窗全部处理完毕，提前进入下一步。`
@@ -524,18 +520,16 @@ class BrowserManager {
       this.logger.info("==================================================");
       this.logger.info(`✅ [Browser] 账号 ${authIndex} 的上下文初始化成功！`);
       this.logger.info("✅ [Browser] 浏览器客户端已准备就绪。");
-      this._startBackgroundWakeup();
       this.logger.info("==================================================");
+      this._startBackgroundWakeup();
     } catch (error) {
       this.logger.error(
         `❌ [Browser] 账户 ${authIndex} 的上下文初始化失败: ${error.message}`
       );
-      // --- [修改 3] 暂时注释掉下面这几行，防止窗口闪退 ---
-      // if (this.browser) {
-      //   await this.browser.close();
-      //   this.browser = null;
-      // }
-      // -------------------------------------------------
+      if (this.browser) {
+        await this.browser.close();
+        this.browser = null;
+      }
       throw error;
     }
   }
