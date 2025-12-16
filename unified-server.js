@@ -556,20 +556,16 @@ class BrowserManager {
   }
 
   async _startBackgroundWakeup() {
-    // 锁定当前页面实例
     const currentPage = this.page;
-    // 启动缓冲
+    // 1. 启动缓冲
     await new Promise((r) => setTimeout(r, 1000));
 
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
 
     this.logger.info(
-      "[Browser] (后台任务) 🛡️ V8 抗休眠引擎启动：主动激活 + 物理点击"
+      "[Browser] (后台任务) 🛡️ V8 引擎启动：主动唤醒 + 瞬时定位 + 沉浸式点击"
     );
-
-    // 定义一个鼠标抖动的辅助变量
-    let jiggleX = 100;
 
     while (
       currentPage &&
@@ -577,90 +573,100 @@ class BrowserManager {
       this.page === currentPage
     ) {
       try {
-        // --- [核心改进 1] 主动骚扰浏览器 (模拟 /models 请求带来的唤醒效果) ---
-        // 1. 强制聚焦窗口 (告诉浏览器：我很重要，别休眠)
-        await currentPage.evaluate(() => window.focus()).catch(() => {});
+        // --- [关键] 步骤 1: 强制唤醒页面 ---
+        // 模拟用户切回这个标签页，强制 Chrome 提升渲染优先级
+        // 只要这一步执行了，效果就等同于你发送了 /models 请求
+        await currentPage.bringToFront().catch(() => {});
 
-        // 2. 鼠标微动 (模拟用户活跃，触发浏览器的渲染层)
-        // 每次循环稍微移动一下鼠标，防止被判定为 idle
-        jiggleX = jiggleX === 100 ? 101 : 100;
-        await currentPage.mouse.move(jiggleX, 100);
+        // --- 步骤 2: 极速查找 (在浏览器内部完成，0延迟) ---
+        // 我们不传回 elementHandle，只传回坐标 {x, y}，这样最快
+        const targetInfo = await currentPage.evaluate(() => {
+          // 扫描所有可能的文本容器
+          const candidates = Array.from(
+            document.querySelectorAll('button, span, div[role="button"], a')
+          );
 
-        // --- [核心改进 2] 顺手清理 "Got it" ---
-        try {
-          const gotIt = currentPage.getByText("Got it").first();
-          if (await gotIt.isVisible({ timeout: 50 })) {
-            await gotIt.click({ force: true, noWaitAfter: true });
-          }
-        } catch (e) {}
+          for (const el of candidates) {
+            // 1. 文本匹配 (宽松模式)
+            const text = el.innerText || "";
+            if (!/Launch|rocket_launch/i.test(text)) continue;
 
-        // --- 3. 查找逻辑 (保持 V7 的文本查找) ---
-        // 注意：这里把 timeout 设为 500ms，配合循环，相当于每 0.5 秒“主动”看一次
-        // 相比之前的死等，这种“主动激活+短时查找”更能对抗卡顿
-        let candidates = [];
-        try {
-          // 使用 locator + all() 获取当前快照
-          candidates = await currentPage
-            .getByText(/Launch|rocket_launch/i)
-            .all();
-        } catch (e) {}
+            // 2. 坐标与可见性检查
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) continue;
 
-        let targetFound = false;
-
-        for (const candidate of candidates) {
-          try {
-            // 快速检查可见性
-            if (!(await candidate.isVisible({ timeout: 100 }))) continue;
-
-            const box = await candidate.boundingBox();
-            if (!box) continue;
-
-            // [安全区] Y 轴必须在 400 到 800 之间
-            if (box.y > 400 && box.y < 800) {
-              targetFound = true;
-
-              const x = box.x + box.width / 2;
-              const y = box.y + box.height / 2;
-
-              this.logger.info(
-                `[Browser] 🎯 发现目标 (Text) @ ${Math.round(x)},${Math.round(
-                  y
-                )} - 正在执行物理点击...`
-              );
-
-              // --- 4. 物理点击 (保持 V7 的成功逻辑) ---
-              await currentPage.mouse.move(x, y);
-              await currentPage.mouse.down();
-              await new Promise((r) => setTimeout(r, 100)); // 按下保持
-              await currentPage.mouse.up();
-
-              // 稍微等待看效果
-              await new Promise((r) => setTimeout(r, 1000));
-
-              // 检查是否消失
-              const stillVisible = await candidate
-                .isVisible({ timeout: 200 })
-                .catch(() => false);
-              if (!stillVisible) {
-                this.logger.info(`[Browser] ✅ 物理点击生效！按钮已消失。`);
-                // 成功后，为了防止复活，我们不完全退出，而是进入长轮询模式 (每30秒检查一次)
-                // 这样万一它又弹出来也能处理
-                await new Promise((r) => setTimeout(r, 30000));
-              } else {
-                this.logger.warn(`[Browser] ⚠️ 点击后按钮未消失，正在重试...`);
-              }
-
-              break; // 跳出 candidates 循环
+            // 3. 安全区锁定 (Y: 400 - 800)
+            // 完美避开右上角 (Y < 100)
+            if (rect.top > 400 && rect.top < 800) {
+              return {
+                found: true,
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+                text: text.substring(0, 10), // 只取前几个字用于日志
+              };
             }
-          } catch (innerE) {}
-        }
+          }
+          return { found: false };
+        });
 
-        // 如果本轮没找到，短暂休眠 (不要太久，保持“热度”)
-        if (!targetFound) {
-          await new Promise((r) => setTimeout(r, 500));
+        // --- 步骤 3: 物理操作 ---
+        if (targetInfo.found) {
+          this.logger.info(
+            `[Browser] 🎯 瞬时锁定 "${targetInfo.text}" @ ${Math.round(
+              targetInfo.x
+            )},${Math.round(targetInfo.y)} - 执行沉浸式点击...`
+          );
+
+          // A. 移动鼠标到目标
+          await currentPage.mouse.move(targetInfo.x, targetInfo.y);
+
+          // B. [关键] 悬停 200ms (触发 hover 状态，很多按钮需要 hover 才能点)
+          await new Promise((r) => setTimeout(r, 200));
+
+          // C. 按下鼠标
+          await currentPage.mouse.down();
+
+          // D. [关键] 保持按下 300ms (防止点击太快，卡顿的页面没接收到)
+          await new Promise((r) => setTimeout(r, 300));
+
+          // E. 抬起鼠标
+          await currentPage.mouse.up();
+
+          this.logger.info(`[Browser] 🖱️ 点击动作完成，等待页面响应...`);
+
+          // 点击后等待 2 秒，给页面反应时间
+          await new Promise((r) => setTimeout(r, 2000));
+
+          // 再次检查是否消失 (使用同样的 evaluate 逻辑)
+          const stillThere = await currentPage.evaluate(() => {
+            const candidates = Array.from(
+              document.querySelectorAll('button, span, div[role="button"]')
+            );
+            return candidates.some((el) => {
+              const t = el.innerText || "";
+              const r = el.getBoundingClientRect();
+              return (
+                /Launch|rocket_launch/i.test(t) && r.top > 400 && r.height > 0
+              );
+            });
+          });
+
+          if (!stillThere) {
+            this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失，进入休眠。`);
+            await new Promise((r) => setTimeout(r, 30000));
+          } else {
+            this.logger.warn(
+              `[Browser] ⚠️ 按钮依然存在，可能是页面卡顿，准备重试...`
+            );
+          }
+        } else {
+          // 没找到目标
+          // [关键] 稍微动一下鼠标 (0,0)，防止页面认为用户离开了
+          await currentPage.mouse.move(0, 0).catch(() => {});
+          await new Promise((r) => setTimeout(r, 1000));
         }
       } catch (e) {
-        // 发生严重错误（如页面关闭），稍作等待
+        // 忽略页面刷新期间的错误
         await new Promise((r) => setTimeout(r, 1000));
       }
     }
