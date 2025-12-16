@@ -556,15 +556,17 @@ class BrowserManager {
   }
 
   async _startBackgroundWakeup() {
+    // 锁定当前页面实例 (防止账号切换后残留)
     const currentPage = this.page;
-    await new Promise((r) => setTimeout(r, 500));
 
-    // 基本检查
+    // 1. 快速启动缓冲
+    await new Promise((r) => setTimeout(r, 1000));
+
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
 
     this.logger.info(
-      "[Browser] (后台任务) ⚡ V7 注入式极速守护启动：浏览器内原生坐标计算"
+      "[Browser] (后台任务) 🛡️ 极速守护模式启动 (Browser-Side Execution)"
     );
 
     while (
@@ -573,92 +575,76 @@ class BrowserManager {
       this.page === currentPage
     ) {
       try {
-        // --- 1. 注入式扫描 (核心提速点) ---
-        // 我们不再把元素列表拉回 Node.js 遍历，而是直接在浏览器内部找好给 Node.js
-        const targetHandle = await currentPage.evaluateHandle(() => {
-          // A. 获取所有疑似元素 (button, div[role=button], a, span)
-          const elements = Array.from(
-            document.querySelectorAll('button, div[role="button"], span, a')
-          );
-
-          // B. 浏览器内部遍历 (速度极快)
-          for (const el of elements) {
-            // 文本过滤
-            const text = el.innerText || "";
-            if (!/Launch|rocket_launch/i.test(text)) continue;
-
-            // 坐标过滤 (原生 API)
-            const rect = el.getBoundingClientRect();
-
-            // [条件] 必须在 400 - 700 之间，且高度大于0(可见)
-            if (rect.top > 400 && rect.top < 700 && rect.height > 0) {
-              return el; // 找到直接返回 DOM 节点
+        // --- 步骤 1: 优先清理挡路的 "Got it" (借鉴别人的代码，直接点，不等待) ---
+        // 使用 evaluate 在浏览器内瞬间完成检查和点击，没有任何网络延迟
+        await currentPage
+          .evaluate(() => {
+            const gotBtn = document.querySelector('button, div[role="button"]');
+            if (gotBtn && gotBtn.innerText.includes("Got it")) {
+              gotBtn.click();
             }
+          })
+          .catch(() => {});
+
+        // --- 步骤 2: 核心唤醒逻辑 (在浏览器内部完成“查找+坐标筛选+点击”) ---
+        const actionResult = await currentPage.evaluate(() => {
+          // A. 获取所有可能是按钮的元素 (只获取 button 标签，范围更小更准)
+          const buttons = Array.from(document.querySelectorAll("button"));
+
+          // B. 在浏览器内存中极速筛选
+          const target = buttons.find((b) => {
+            // 文本检查
+            const text = b.innerText || "";
+            if (!/Launch|rocket_launch/i.test(text)) return false;
+
+            // 坐标检查 (你的核心安全逻辑)
+            const rect = b.getBoundingClientRect();
+            const isVisible = rect.width > 0 && rect.height > 0;
+            // 范围锁定在 400 - 800 之间 (稍微放宽一点下限以防万一)
+            const inZone = rect.top > 400 && rect.top < 800;
+
+            return isVisible && inZone;
+          });
+
+          // C. 找到直接点击
+          if (target) {
+            target.click();
+            return { clicked: true, y: target.getBoundingClientRect().top }; // 返回结果给 Node
           }
-          return null; // 没找到
+          return { clicked: false };
         });
 
-        // --- 2. 极速点击 ---
-        // targetHandle 是一个指向浏览器 DOM 元素的引用
-        // asElement() 把它转为 Playwright 的 ElementHandle
-        const element = targetHandle.asElement();
-
-        if (element) {
+        if (actionResult.clicked) {
           this.logger.info(
-            `[Browser] ⚡ 瞬时锁定目标 (浏览器内计算)，立即执行！`
+            `[Browser] ⚡ 极速命中目标 (Y=${Math.round(
+              actionResult.y
+            )})，已触发点击！`
           );
 
-          // 处理 Got it (非阻塞)
-          currentPage
-            .locator('button:has-text("Got it")')
-            .click({ force: true })
-            .catch(() => {});
-
-          // [核心修改] 使用原生 JS 点击
-          // 之前的 click() 是模拟鼠标行为，容易被遮挡或点不准
-          // evaluate(el => el.click()) 是直接触发 DOM 点击事件，最暴力、最有效
-          await element
-            .evaluate((el) => el.click())
-            .catch((e) => {
-              // 如果原生点击失败，回退到 Playwright 强力点击
-              return element.click({ force: true, noWaitAfter: true });
-            });
-
-          // 点击后等待 1 秒验证
+          // 点击后，高频检测该按钮是否消失 (借用别人的逻辑，确认点击有效)
+          // 等待 1 秒看效果
           await new Promise((r) => setTimeout(r, 1000));
 
-          // 检查是否消失 (需要在浏览器内检查，因为 element handle 可能已失效)
-          const isGone = await element
-            .evaluate((el) => {
-              const rect = el.getBoundingClientRect();
-              return (
-                rect.width === 0 ||
-                rect.height === 0 ||
-                !document.body.contains(el)
-              );
-            })
-            .catch(() => true); // 如果报错说明节点被移除了，也是成功
-
-          if (isGone) {
-            this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失。`);
-            // 成功后冷却 30 秒
-            await new Promise((r) => setTimeout(r, 30000));
-          } else {
-            this.logger.warn(
-              `[Browser] ⚠️ 点击已执行但按钮未消失，可能正在加载中...`
+          // 再次检查是否真的消失了 (可选)
+          const stillExists = await currentPage.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll("button"));
+            return buttons.some(
+              (b) =>
+                /Launch|rocket_launch/i.test(b.innerText) &&
+                b.getBoundingClientRect().top > 400
             );
-            // 如果还在，多等一会儿 (2秒) 再重试，避免刷屏
-            await new Promise((r) => setTimeout(r, 2000));
+          });
+
+          if (!stillExists) {
+            this.logger.info(`[Browser] ✅ 唤醒成功！按钮已消失，进入长休眠。`);
+            await new Promise((r) => setTimeout(r, 30000)); // 成功后休眠 30 秒
           }
         } else {
-          // 没找到，休息 1 秒
+          // 没找到符合坐标的按钮，短暂休息后继续扫描
           await new Promise((r) => setTimeout(r, 1000));
         }
-
-        // 释放句柄，防止内存泄漏
-        if (targetHandle) await targetHandle.dispose().catch(() => {});
       } catch (e) {
-        // 忽略上下文丢失等错误
+        // 忽略上下文丢失等错误，保持循环
         await new Promise((r) => setTimeout(r, 1000));
       }
     }
