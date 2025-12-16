@@ -554,125 +554,132 @@ class BrowserManager {
       `✅ [Browser] 账号切换完成，当前账号: ${this.currentAuthIndex}`
     );
   }
-
-   async _startBackgroundWakeup() {
+  async _startBackgroundWakeup() {
     // 1. 启动缓冲
     await new Promise((r) => setTimeout(r, 5000));
 
     if (!this.page || this.page.isClosed()) return;
 
     this.logger.info(
-      "[Browser] (后台任务) 🛡️ 已启动永久守护模式：智能监测 Launch 按钮..."
+      "[Browser] (后台任务) 🛡️ 已启动永久守护模式：每 5 秒监测一次 Launch 按钮..."
     );
 
+    // 状态标记，防止重复打印无用日志
+    let lastLogTime = 0;
+
     while (this.page && !this.page.isClosed()) {
+      // --- 第一层防线：页面存活检查 ---
+      if (!this.page) break;
+
       try {
-        if (!this.page) break;
-
-        // --- 第一部分：防御性处理突发弹窗 (Got it / Close) ---
-        // 这是为了防止运行几小时后突然出现的弹窗卡住页面
-        try {
-            // 查找所有可能的弹窗按钮
-            const dialogBtns = this.page.locator('button, div[role="button"]').filter({ hasText: /Got it|Close|Agree/i });
-            if (await dialogBtns.count() > 0) {
-                // 只有当它们可见时才点击
-                const btn = dialogBtns.first();
-                if (await btn.isVisible({ timeout: 200 })) {
-                    this.logger.info("[Browser] (后台任务) 发现干扰弹窗，正在关闭...");
-                    await btn.click({ force: true });
-                    // 简单的遮罩层清理
-                    await this.page.evaluate(() => {
-                        document.querySelectorAll(".cdk-overlay-backdrop").forEach(el => el.remove());
-                    }).catch(() => {});
-                }
-            }
-        } catch (e) {}
-
-        // --- 第二部分：核心 Launch 按钮点击逻辑 ---
-        
-        // 1. 查找页面上所有可能相关的按钮
-        // 我们查找含有 "Launch", "Run", "Start" 或图标 "rocket_launch" 的按钮
+        // [修改点1] 扩大搜索范围，不仅找 button，也找可能是按钮的 div/span/a
+        // 关键词覆盖：Launch (文字), rocket_launch (图标代码)
         const candidates = this.page
-          .locator("button")
-          .filter({ hasText: /Launch|Run|Start|rocket_launch/i });
+          .locator('button, a, div[role="button"], span')
+          .filter({ hasText: /Launch|rocket_launch/i });
 
-        const count = await candidates.count().catch(() => 0);
+        let count = 0;
+        try {
+          count = await candidates.count();
+        } catch (e) {
+          // 忽略计数错误
+        }
+
+        if (count > 0 && Date.now() - lastLogTime > 10000) {
+             // 只有发现疑似目标时才打印，且每10秒最多打一次，防止刷屏
+             this.logger.info(`[Browser] (后台任务) 扫描到 ${count} 个疑似 Launch 元素，开始分析坐标...`);
+             lastLogTime = Date.now();
+        }
 
         let realLaunchBtn = null;
 
         for (let i = 0; i < count; i++) {
           const btn = candidates.nth(i);
-          
-          // 获取按钮的全部文本内容
-          const btnText = await btn.innerText().catch(() => "");
-          
-          // [关键逻辑 1] 严格排除右上角的“部署”按钮
-          // 右上角按钮通常包含 "Deploy" 或 "部署"
-          if (btnText.includes("Deploy") || btnText.includes("部署")) {
-             continue;
-          }
+          try {
+            // 获取位置信息
+            const box = await btn.boundingBox();
+            if (!box) continue;
 
-          // [关键逻辑 2] 排除纯图标按钮
-          // 右上角的按钮可能 text 只有 "rocket_launch" (图标代码) 而没有人类可读文字
-          // 中间的 Launch 按钮通常会有 "Launch" 这个单词
-          // 如果文本完全等于 "rocket_launch" (去空格后)，说明它可能只是个图标按钮，跳过
-          if (btnText.trim() === "rocket_launch") {
-             continue;
-          }
+            // 获取文本用于调试（不再用于核心判断逻辑）
+            const text = (await btn.innerText()).replace(/\n/g, ' ').trim();
 
-          // [关键逻辑 3] 必须包含实质性的启动动作词汇
-          // 只有当按钮包含明确的 "Launch", "Run" 或 "Start" 时才认为是目标
-          // (忽略大小写)
-          if (/Launch|Run|Start/i.test(btnText)) {
-             // 找到了！
-             // 额外的双重确认：确保它可见
-             if (await btn.isVisible().catch(() => false)) {
-                realLaunchBtn = btn;
-                this.logger.info(`[Browser] (后台任务) 锁定目标按钮，文本内容: "${btnText.replace(/\n/g, ' ')}"`);
-                break;
-             }
+            // [调试日志] 打印每个发现的按钮位置，帮你“看见”页面
+            // this.logger.info(`[Debug] 发现元素 #${i}: Text="${text.substring(0, 20)}...", Y=${Math.round(box.y)}, X=${Math.round(box.x)}`);
+
+            // [核心修改点2] 坐标霸权逻辑
+            // 只要 Y 坐标大于 80 (避开顶部导航栏)，我们就认为它是正文区的按钮
+            // 此时不再过滤 "Deploy" 关键字，防止误杀中间的按钮
+            if (box.y > 80) { 
+              this.logger.info(`[Browser] ✅ 锁定目标按钮！(Y=${Math.round(box.y)} > 80) 内容: "${text.substring(0, 15)}..."`);
+              realLaunchBtn = btn;
+              break; // 找到第一个符合坐标条件的就退出
+            }
+          } catch (e) {
+             // 元素可能在遍历过程中消失，忽略
+             break;
           }
         }
 
-        // 3. 执行点击
+        // 3. 执行点击逻辑
         if (realLaunchBtn) {
           this.logger.warn(
-            "⚠️ [Browser] (后台任务) 监测到 Launch 按钮！准备点击..."
+            "⚠️ [Browser] (后台任务) 准备点击 Launch 按钮..."
           );
           
+          // 先尝试清理可能存在的遮罩
+          try {
+             // 处理 "Got it"
+            const gotIt = this.page.locator('button:has-text("Got it")').first();
+            if (await gotIt.isVisible({ timeout: 100 })) await gotIt.click({ force: true });
+            
+            // 移除遮罩层
+            await this.page.evaluate(() => {
+              document.querySelectorAll(".cdk-overlay-backdrop").forEach((el) => el.remove());
+            }).catch(() => {});
+          } catch (e) {}
+
+          // 暴力点击尝试
           let clickAttempts = 0;
-          while (clickAttempts < 5) { // 尝试5次
+          let clickedSuccess = false;
+          while (clickAttempts < 5) {
             try {
-                if(!this.page || this.page.isClosed()) break;
+                if (!this.page || this.page.isClosed()) break;
                 
-                if (!(await realLaunchBtn.isVisible({ timeout: 200 }))) {
-                  this.logger.info("[Browser] ✅ Launch 按钮已处理 (已消失)。");
+                // 检查按钮是否还存在
+                if (!(await realLaunchBtn.isVisible({ timeout: 500 }))) {
+                  this.logger.info("[Browser] ✅ 按钮点击后消失，判定为成功。");
+                  clickedSuccess = true;
                   break;
                 }
                 
-                // 尝试点击
+                // 强制点击
                 await realLaunchBtn.click({ force: true, timeout: 1000 });
-                this.logger.info(`[Browser] (后台任务) 点击尝试 ${clickAttempts + 1} 完成`);
-                
                 await new Promise((r) => setTimeout(r, 1000));
                 clickAttempts++;
             } catch(e) {
-                // 点击失败通常意味着元素被覆盖或消失了
-                break; 
+                // 如果报错且不是超时，可能是元素被卸载了（也算成功）
+                if (!e.message.includes('Timeout')) {
+                    clickedSuccess = true;
+                    break; 
+                }
             }
           }
+          
+          if (clickedSuccess || clickAttempts >= 5) {
+              // 为了防止死循环点击同一个未消失的按钮，这里可以加个长等待
+              await new Promise((r) => setTimeout(r, 3000));
+          }
         }
-
       } catch (e) {
-        // 忽略循环中的轻微错误，保持守护进程存活
+          // 捕获所有未知错误，防止崩溃
       }
-
-      // [防崩溃] 使用原生 Promise 等待，不依赖 page 对象
+      
+      // [关键修复] 放在 try-catch 外面的安全等待
       await new Promise((r) => setTimeout(r, 5000));
     }
 
-    this.logger.info("[Browser] (后台任务) 页面已关闭，守护任务结束。");
-   }
+    this.logger.info("[Browser] (后台任务) 页面已关闭或重置，守护任务结束。");
+  }
 }
 
 // ===================================================================================
@@ -2946,4 +2953,5 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
+
 
