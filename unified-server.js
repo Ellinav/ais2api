@@ -75,7 +75,7 @@ class AuthSource {
       }
     }
 
-    // 将扫描到的原始索引存起来
+    // 存取扫描到的原始索引
     this.initialIndices = [...new Set(indices)].sort((a, b) => a - b);
     this.availableIndices = [...this.initialIndices]; // 先假设都可用
 
@@ -3081,3 +3081,4 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
+
