@@ -211,9 +211,7 @@ class BrowserManager {
 
   notifyUserActivity() {
     if (this.noButtonCount > 0) {
-      this.logger.info(
-        "[Browser] ⚡ 收到用户请求信号，强制唤醒后台检测 (重置计数器)"
-      );
+      this.logger.info("[Browser] ⚡ 收到用户请求，强制唤醒Launch检测");
       this.noButtonCount = 0;
     }
   }
@@ -531,7 +529,7 @@ class BrowserManager {
       // === 步骤 A: 启动后台保活监控 ===
       // 注意：不要 await 这个方法，因为它是一个死循环
       this._startBackgroundWakeup();
-      this.logger.info("[Browser] (后台任务) 🛡️ 监控进程初始化指令已发出...");
+      this.logger.info("[Browser] (后台任务) 🛡️ 监控初始化指令已发出...");
       // 后台任务内部有 1500ms 的启动延迟，所以至少要等 2000ms
       await this.page.waitForTimeout(8000);
 
