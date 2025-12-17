@@ -525,10 +525,17 @@ class BrowserManager {
       );
       await this.page.locator('button:text("Preview")').click();
       this.logger.info("[Browser] ✅ UI交互完成，脚本已开始运行。");
+
       this.currentAuthIndex = authIndex;
+
+      // === 步骤 A: 启动后台保活监控 ===
+      // 注意：不要 await 这个方法，因为它是一个死循环
       this._startBackgroundWakeup();
-      this.logger.info("[Browser] (后台任务) 🛡️ 监控进程已启动...");
-      await this.page.waitForTimeout(1000);
+      this.logger.info("[Browser] (后台任务) 🛡️ 监控进程初始化指令已发出...");
+      // 后台任务内部有 1500ms 的启动延迟，所以至少要等 2000ms
+      await this.page.waitForTimeout(2500);
+
+      // === 步骤 B: 发送主动唤醒请求 ===
       this.logger.info(
         "[Browser] ⚡ 正在发送主动唤醒请求以触发 Launch 流程..."
       );
@@ -554,12 +561,10 @@ class BrowserManager {
           `[Browser] 主动唤醒请求发送异常 (不影响主流程): ${e.message}`
         );
       }
-
       this.logger.info("==================================================");
       this.logger.info(`✅ [Browser] 账号 ${authIndex} 的上下文初始化成功！`);
       this.logger.info("✅ [Browser] 浏览器客户端已准备就绪。");
       this.logger.info("==================================================");
-      this._startBackgroundWakeup();
     } catch (error) {
       this.logger.error(
         `❌ [Browser] 账户 ${authIndex} 的上下文初始化失败: ${error.message}`
