@@ -533,7 +533,7 @@ class BrowserManager {
       this._startBackgroundWakeup();
       this.logger.info("[Browser] (后台任务) 🛡️ 监控进程初始化指令已发出...");
       // 后台任务内部有 1500ms 的启动延迟，所以至少要等 2000ms
-      await this.page.waitForTimeout(4000);
+      await this.page.waitForTimeout(8000);
 
       // === 步骤 B: 发送主动唤醒请求 ===
       this.logger.info(
