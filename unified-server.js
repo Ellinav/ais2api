@@ -211,7 +211,9 @@ class BrowserManager {
 
   notifyUserActivity() {
     if (this.noButtonCount > 0) {
-      this.logger.info("[Browser] ⚡ 收到用户请求，强制唤醒Launch检测");
+      this.logger.info(
+        "[Browser] ⚡ 收到用户请求信号，强制唤醒后台检测 (重置计数器)"
+      );
       this.noButtonCount = 0;
     }
   }
@@ -523,17 +525,10 @@ class BrowserManager {
       );
       await this.page.locator('button:text("Preview")').click();
       this.logger.info("[Browser] ✅ UI交互完成，脚本已开始运行。");
-
       this.currentAuthIndex = authIndex;
-
-      // === 步骤 A: 启动后台保活监控 ===
-      // 注意：不要 await 这个方法，因为它是一个死循环
       this._startBackgroundWakeup();
-      this.logger.info("[Browser] (后台任务) 🛡️ 监控初始化指令已发出...");
-      // 后台任务内部有 1500ms 的启动延迟，所以至少要等 2000ms
-      await this.page.waitForTimeout(10000);
-
-      // === 步骤 B: 发送主动唤醒请求 ===
+      this.logger.info("[Browser] (后台任务) 🛡️ 监控进程已启动...");
+      await this.page.waitForTimeout(1000);
       this.logger.info(
         "[Browser] ⚡ 正在发送主动唤醒请求以触发 Launch 流程..."
       );
@@ -559,10 +554,12 @@ class BrowserManager {
           `[Browser] 主动唤醒请求发送异常 (不影响主流程): ${e.message}`
         );
       }
+
       this.logger.info("==================================================");
       this.logger.info(`✅ [Browser] 账号 ${authIndex} 的上下文初始化成功！`);
       this.logger.info("✅ [Browser] 浏览器客户端已准备就绪。");
       this.logger.info("==================================================");
+      this._startBackgroundWakeup();
     } catch (error) {
       this.logger.error(
         `❌ [Browser] 账户 ${authIndex} 的上下文初始化失败: ${error.message}`
@@ -598,7 +595,7 @@ class BrowserManager {
 
   async _startBackgroundWakeup() {
     const currentPage = this.page;
-    await new Promise((r) => setTimeout(r, 2500));
+    await new Promise((r) => setTimeout(r, 1500));
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
     this.logger.info("[Browser] (后台任务) 🛡️ 网页保活监控已启动");
@@ -2499,6 +2496,9 @@ class ProxyServerSystem extends EventEmitter {
   async start(initialAuthIndex = null) {
     // <<<--- 1. 重新接收参数
     this.logger.info("[System] 开始弹性启动流程...");
+    await this._startHttpServer();
+    await this._startWebSocketServer();
+    this.logger.info("[System] 准备加载浏览器...");
     const allAvailableIndices = this.authSource.availableIndices;
 
     if (allAvailableIndices.length === 0) {
@@ -2551,10 +2551,6 @@ class ProxyServerSystem extends EventEmitter {
       // 如果所有账号都尝试失败了
       throw new Error("所有认证源均尝试失败，服务器无法启动。");
     }
-
-    // 只有在浏览器成功启动后，才启动网络服务
-    await this._startHttpServer();
-    await this._startWebSocketServer();
     this.logger.info(`[System] 代理服务器系统启动完成。`);
     this.emit("started");
   }
@@ -3085,4 +3081,3 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
-
