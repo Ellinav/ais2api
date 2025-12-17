@@ -289,15 +289,17 @@ class ProxySystem extends EventTarget {
 
   async initialize() {
     Logger.output("系统初始化中...");
-    try {
-      await this.connectionManager.establish();
-      Logger.output("系统初始化完成，等待服务器指令...");
-      this.dispatchEvent(new CustomEvent("ready"));
-    } catch (error) {
-      Logger.output("系统初始化失败:", error.message);
-      this.dispatchEvent(new CustomEvent("error", { detail: error }));
-      throw error;
+    while (true) {
+      try {
+        await this.connectionManager.establish();
+        break;
+      } catch (error) {
+        Logger.output("连接服务器失败，1秒后重试...");
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
     }
+    Logger.output("系统初始化完成，等待服务器指令...");
+    this.dispatchEvent(new CustomEvent("ready"));
   }
 
   _setupEventHandlers() {
