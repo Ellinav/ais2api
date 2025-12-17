@@ -176,7 +176,7 @@ class BrowserManager {
     this.page = null;
     this.currentAuthIndex = 0;
     this.scriptFileName = "black-browser.js";
-    // [优化] 为低内存的Docker/云环境设置优化的启动参数
+    this.noButtonCount = 0;
     this.launchArgs = [
       "--disable-dev-shm-usage", // 关键！防止 /dev/shm 空间不足导致浏览器崩溃
       "--disable-gpu",
@@ -206,6 +206,15 @@ class BrowserManager {
       } else {
         throw new Error(`Unsupported operating system: ${platform}`);
       }
+    }
+  }
+
+  notifyUserActivity() {
+    if (this.noButtonCount > 0) {
+      this.logger.info(
+        "[Browser] ⚡ 收到用户请求信号，强制唤醒后台检测 (重置计数器)"
+      );
+      this.noButtonCount = 0;
     }
   }
 
@@ -584,16 +593,10 @@ class BrowserManager {
 
   async _startBackgroundWakeup() {
     const currentPage = this.page;
-    // 1. 启动缓冲
     await new Promise((r) => setTimeout(r, 1500));
-
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
-
     this.logger.info("[Browser] (后台任务) 🛡️ 网页保活监控已启动");
-
-    let noButtonCount = 0;
-
     while (
       currentPage &&
       !currentPage.isClosed() &&
@@ -678,12 +681,8 @@ class BrowserManager {
 
         // --- [增强步骤 3] 执行操作 ---
         if (targetInfo.found) {
-          noButtonCount = 0; // 重置计数
-          this.logger.info(
-            `[Browser] 🎯 锁定目标 [${targetInfo.tagName}] "${
-              targetInfo.text
-            }" @ (${Math.round(targetInfo.x)}, ${Math.round(targetInfo.y)})`
-          );
+          this.noButtonCount = 0;
+          this.logger.info(`[Browser] 🎯 锁定目标 [${targetInfo.tagName}] ...`);
 
           // === 策略 A: 物理点击 (模拟真实鼠标) ===
           // 1. 移动过去
@@ -700,7 +699,6 @@ class BrowserManager {
           await currentPage.mouse.up();
 
           this.logger.info(`[Browser] 🖱️ 物理点击已执行，验证结果...`);
-
           // 等待 1.5 秒看效果
           await new Promise((r) => setTimeout(r, 1500));
 
@@ -756,24 +754,27 @@ class BrowserManager {
                 }
               }
             });
-            // 再等一会
             await new Promise((r) => setTimeout(r, 2000));
           } else {
             this.logger.info(`[Browser] ✅ 物理点击成功，按钮已消失。`);
-            // 成功消除后，可以休眠久一点
             await new Promise((r) => setTimeout(r, 60000));
+            this.noButtonCount = 21;
           }
         } else {
-          // 没找到目标
-          noButtonCount++;
-          // 如果连续很多次没找到，说明页面很干净，可以降低检测频率（省CPU）
-          // 如果刚发完请求，可能需要高频检测
-          const sleepTime = noButtonCount > 20 ? 30000 : 1500;
-          await new Promise((r) => setTimeout(r, sleepTime));
+          this.noButtonCount++;
+          // 5. [关键] 智能休眠逻辑 (支持被唤醒)
+          if (this.noButtonCount > 20) {
+            for (let i = 0; i < 30; i++) {
+              if (this.noButtonCount === 0) {
+                break;
+              }
+              await new Promise((r) => setTimeout(r, 1000));
+            }
+          } else {
+            await new Promise((r) => setTimeout(r, 1500));
+          }
         }
       } catch (e) {
-        // 忽略页面刷新/上下文销毁期间的错误
-        // this.logger.debug(`[BackgroundLoop] Debug: ${e.message}`);
         await new Promise((r) => setTimeout(r, 1000));
       }
     }
@@ -1215,6 +1216,9 @@ class RequestHandler {
   }
 
   async processRequest(req, res) {
+    if (this.browserManager) {
+      this.browserManager.notifyUserActivity();
+    }
     const requestId = this._generateRequestId();
     res.on("close", () => {
       if (!res.writableEnded) {
@@ -1331,6 +1335,9 @@ class RequestHandler {
   }
 
   async processOpenAIRequest(req, res) {
+    if (this.browserManager) {
+      this.browserManager.notifyUserActivity();
+    }
     const requestId = this._generateRequestId();
     const isOpenAIStream = req.body.stream === true;
     const model = req.body.model || "gemini-1.5-pro-latest";
