@@ -531,7 +531,7 @@ class BrowserManager {
       this._startBackgroundWakeup();
       this.logger.info("[Browser] (后台任务) 🛡️ 监控初始化指令已发出...");
       // 后台任务内部有 1500ms 的启动延迟，所以至少要等 2000ms
-      await this.page.waitForTimeout(8000);
+      await this.page.waitForTimeout(10000);
 
       // === 步骤 B: 发送主动唤醒请求 ===
       this.logger.info(
@@ -598,7 +598,7 @@ class BrowserManager {
 
   async _startBackgroundWakeup() {
     const currentPage = this.page;
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, 2500));
     if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
       return;
     this.logger.info("[Browser] (后台任务) 🛡️ 网页保活监控已启动");
@@ -3085,3 +3085,4 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
+
