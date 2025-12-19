@@ -2642,7 +2642,10 @@ class ProxyServerSystem extends EventEmitter {
       );
       res.header(
         "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, x-requested-with, x-api-key, x-goog-api-key, origin, accept"
+          "Content-Type, Authorization, x-requested-with, x-api-key, x-goog-api-key, x-goog-api-client, x-user-agent," +
+          " origin, accept, baggage, sentry-trace, openai-organization, openai-project, openai-beta, x-stainless-lang, " +
+          "x-stainless-package-version, x-stainless-os, x-stainless-arch, x-stainless-runtime, x-stainless-runtime-version, " +
+          "x-stainless-retry-count, x-stainless-timeout, sec-ch-ua, sec-ch-ua-mobile, sec-ch-ua-platform"
       );
       if (req.method === "OPTIONS") {
         return res.sendStatus(204);
