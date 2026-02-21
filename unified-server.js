@@ -24,11 +24,11 @@ class AuthSource {
     if (process.env.AUTH_JSON_1) {
       this.authMode = "env";
       this.logger.info(
-        "[Auth] 检测到 AUTH_JSON_1 环境变量，切换到环境变量认证模式。"
+        "[Auth] 检测到 AUTH_JSON_1 环境变量，切换到环境变量认证模式。",
       );
     } else {
       this.logger.info(
-        '[Auth] 未检测到环境变量认证，将使用 "auth/" 目录下的文件。'
+        '[Auth] 未检测到环境变量认证，将使用 "auth/" 目录下的文件。',
       );
     }
 
@@ -37,7 +37,7 @@ class AuthSource {
 
     if (this.availableIndices.length === 0) {
       this.logger.error(
-        `[Auth] 致命错误：在 '${this.authMode}' 模式下未找到任何有效的认证源。`
+        `[Auth] 致命错误：在 '${this.authMode}' 模式下未找到任何有效的认证源。`,
       );
       throw new Error("No valid authentication sources found.");
     }
@@ -66,7 +66,7 @@ class AuthSource {
         const files = fs.readdirSync(authDir);
         const authFiles = files.filter((file) => /^auth-\d+\.json$/.test(file));
         indices = authFiles.map((file) =>
-          parseInt(file.match(/^auth-(\d+)\.json$/)[1], 10)
+          parseInt(file.match(/^auth-(\d+)\.json$/)[1], 10),
         );
       } catch (error) {
         this.logger.error(`[Auth] 扫描 "auth/" 目录失败: ${error.message}`);
@@ -82,7 +82,7 @@ class AuthSource {
     this.logger.info(
       `[Auth] 在 '${this.authMode}' 模式下，初步发现 ${
         this.initialIndices.length
-      } 个认证源: [${this.initialIndices.join(", ")}]`
+      } 个认证源: [${this.initialIndices.join(", ")}]`,
     );
   }
 
@@ -102,7 +102,7 @@ class AuthSource {
           validIndices.push(index);
           this.accountNameMap.set(
             index,
-            authData.accountName || "N/A (未命名)"
+            authData.accountName || "N/A (未命名)",
           );
         } catch (e) {
           invalidSourceDescriptions.push(`auth-${index}`);
@@ -117,8 +117,8 @@ class AuthSource {
         `⚠️ [Auth] 预检验发现 ${
           invalidSourceDescriptions.length
         } 个格式错误或无法读取的认证源: [${invalidSourceDescriptions.join(
-          ", "
-        )}]，将从可用列表中移除。`
+          ", ",
+        )}]，将从可用列表中移除。`,
       );
     }
 
@@ -156,7 +156,7 @@ class AuthSource {
       return JSON.parse(jsonString);
     } catch (e) {
       this.logger.error(
-        `[Auth] 解析来自认证源 #${index} 的JSON内容失败: ${e.message}`
+        `[Auth] 解析来自认证源 #${index} 的JSON内容失败: ${e.message}`,
       );
       return null;
     }
@@ -201,7 +201,7 @@ class BrowserManager {
         this.browserExecutablePath = path.join(
           __dirname,
           "camoufox-linux",
-          "camoufox"
+          "camoufox",
         );
       } else {
         throw new Error(`Unsupported operating system: ${platform}`);
@@ -212,7 +212,7 @@ class BrowserManager {
   notifyUserActivity() {
     if (this.noButtonCount > 0) {
       this.logger.info(
-        "[Browser] ⚡ 收到用户请求信号，强制唤醒后台检测 (重置计数器)"
+        "[Browser] ⚡ 收到用户请求信号，强制唤醒后台检测 (重置计数器)",
       );
       this.noButtonCount = 0;
     }
@@ -223,7 +223,7 @@ class BrowserManager {
       this.logger.info("🚀 [Browser] 浏览器实例未运行，正在进行首次启动...");
       if (!fs.existsSync(this.browserExecutablePath)) {
         throw new Error(
-          `Browser executable not found at path: ${this.browserExecutablePath}`
+          `Browser executable not found at path: ${this.browserExecutablePath}`,
         );
       }
       this.browser = await firefox.launch({
@@ -253,7 +253,7 @@ class BrowserManager {
         : `文件 auth-${authIndex}.json`;
     this.logger.info("==================================================");
     this.logger.info(
-      `🔄 [Browser] 正在为账号 #${authIndex} 创建新的浏览器上下文`
+      `🔄 [Browser] 正在为账号 #${authIndex} 创建新的浏览器上下文`,
     );
     this.logger.info(`   • 认证源: ${sourceDescription}`);
     this.logger.info("==================================================");
@@ -261,12 +261,12 @@ class BrowserManager {
     const storageStateObject = this.authSource.getAuth(authIndex);
     if (!storageStateObject) {
       throw new Error(
-        `Failed to get or parse auth source for index ${authIndex}.`
+        `Failed to get or parse auth source for index ${authIndex}.`,
       );
     }
     const buildScriptContent = fs.readFileSync(
       path.join(__dirname, this.scriptFileName),
-      "utf-8"
+      "utf-8",
     );
 
     try {
@@ -279,7 +279,7 @@ class BrowserManager {
         const msgText = msg.text();
         if (msgText.includes("[ProxyClient]")) {
           this.logger.info(
-            `[Browser] ${msgText.replace("[ProxyClient] ", "")}`
+            `[Browser] ${msgText.replace("[ProxyClient] ", "")}`,
           );
         } else if (msg.type() === "error") {
           this.logger.error(`[Browser Page Error] ${msgText}`);
@@ -287,8 +287,7 @@ class BrowserManager {
       });
 
       this.logger.info(`[Browser] 正在导航至目标网页...`);
-      const targetUrl =
-        "https://aistudio.google.com/u/0/apps/bundled/blank?showPreview=true&showCode=true&showAssistant=true";
+      const targetUrl = this.config.targetUrl;
       await this.page.goto(targetUrl, {
         timeout: 180000,
         waitUntil: "domcontentloaded",
@@ -316,7 +315,7 @@ class BrowserManager {
         pageTitle.includes("登录")
       ) {
         throw new Error(
-          "🚨 Cookie 已失效/过期！浏览器被重定向到了 Google 登录页面。请重新提取 storageState。"
+          "🚨 Cookie 已失效/过期！浏览器被重定向到了 Google 登录页面。请重新提取 storageState。",
         );
       }
 
@@ -327,26 +326,26 @@ class BrowserManager {
         pageTitle.includes("not available")
       ) {
         throw new Error(
-          "🚨 当前 IP 不支持访问 Google AI Studio。请更换节点后重启！"
+          "🚨 当前 IP 不支持访问 Google AI Studio。请更换节点后重启！",
         );
       }
 
       // 3. 检查 IP 风控 (403 Forbidden)
       if (pageTitle.includes("403") || pageTitle.includes("Forbidden")) {
         throw new Error(
-          "🚨 403 Forbidden：当前 IP 信誉过低，被 Google 风控拒绝访问。"
+          "🚨 403 Forbidden：当前 IP 信誉过低，被 Google 风控拒绝访问。",
         );
       }
 
       // 4. 检查白屏 (网络极差或加载失败)
       if (currentUrl === "about:blank") {
         throw new Error(
-          "🚨 页面加载失败 (about:blank)，可能是网络连接超时或浏览器崩溃。"
+          "🚨 页面加载失败 (about:blank)，可能是网络连接超时或浏览器崩溃。",
         );
       }
 
       this.logger.info(
-        `[Browser] 进入 20秒 检查流程 (目标: Cookie + Got it + 新手引导)...`
+        `[Browser] 进入 20秒 检查流程 (目标: Cookie + Got it + 新手引导)...`,
       );
 
       const startTime = Date.now();
@@ -357,13 +356,14 @@ class BrowserManager {
         cookie: false,
         gotIt: false,
         guide: false,
+        continueBtn: false,
       };
 
       while (Date.now() - startTime < timeLimit) {
         // 如果3个都处理过了，立刻退出 ---
         if (popupStatus.cookie && popupStatus.gotIt && popupStatus.guide) {
           this.logger.info(
-            `[Browser] ⚡ 完美！3个弹窗全部处理完毕，提前进入下一步。`
+            `[Browser] ⚡ 完美！3个弹窗全部处理完毕，提前进入下一步。`,
           );
           break;
         }
@@ -413,124 +413,66 @@ class BrowserManager {
           } catch (e) {}
         }
 
+        if (!popupStatus.continueBtn) {
+          try {
+            const clicked = await this.page.evaluate(() => {
+              const btns = Array.from(document.querySelectorAll("button"));
+              const target = btns.find(
+                (b) =>
+                  b.innerText && b.innerText.includes("Continue to the app"),
+              );
+              if (target) {
+                target.click();
+                return true;
+              }
+              return false;
+            });
+
+            if (clicked) {
+              this.logger.info(
+                `[Browser] ✅ (4/4) 原生JS成功点击 "Continue to the app"`,
+              );
+              popupStatus.continueBtn = true;
+              clickedInThisLoop = true;
+              this.logger.info(
+                `[Browser] ⚡ 已确认进入应用，提前终止弹窗等待循环。`,
+              );
+              break;
+            }
+          } catch (e) {}
+        }
+        try {
+          const isAppRunning = await this.page.evaluate(() => {
+            // 只要页面里出现了 ProxyClient 的输出，就说明代码已经跑起来了
+            return document.body.innerText.includes("[ProxyClient]");
+          });
+          if (isAppRunning) {
+            this.logger.info(
+              `[Browser] ⚡ 检测到内部环境已就绪，跳出弹窗等待。`,
+            );
+            break;
+          }
+        } catch (e) {}
+
         // 如果本轮点击了按钮，稍微等一下动画；如果没点，等待1秒避免死循环空转
         await this.page.waitForTimeout(clickedInThisLoop ? 500 : 1000);
       }
 
       this.logger.info(
         `[Browser] 弹窗检查结束 (耗时: ${Math.round(
-          (Date.now() - startTime) / 1000
+          (Date.now() - startTime) / 1000,
         )}s)，结果: ` +
           `Cookie[${popupStatus.cookie ? "Ok" : "No"}], ` +
           `GotIt[${popupStatus.gotIt ? "Ok" : "No"}], ` +
-          `Guide[${popupStatus.guide ? "Ok" : "No"}]`
+          `Guide[${popupStatus.guide ? "Ok" : "No"}]`,
       );
 
-      this.logger.info(
-        `[Browser] 弹窗清理阶段结束，准备进入 Code 按钮点击流程。`
-      );
-
-      await this.page.evaluate(() => {
-        const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
-        if (overlays.length > 0) {
-          console.log(
-            `[ProxyClient] (内部JS) 发现并移除了 ${overlays.length} 个遮罩层。`
-          );
-          overlays.forEach((el) => el.remove());
-        }
-      });
-
-      this.logger.info('[Browser] (步骤1/5) 准备点击 "Code" 按钮...');
-      for (let i = 1; i <= 5; i++) {
-        try {
-          this.logger.info(`  [尝试 ${i}/5] 清理遮罩层并点击...`);
-          await this.page.evaluate(() => {
-            document
-              .querySelectorAll("div.cdk-overlay-backdrop")
-              .forEach((el) => el.remove());
-          });
-          await this.page.waitForTimeout(500);
-
-          await this.page
-            .locator('button:text("Code")')
-            .click({ timeout: 10000 });
-          this.logger.info("  ✅ 点击成功！");
-          break;
-        } catch (error) {
-          this.logger.warn(
-            `  [尝试 ${i}/5] 点击失败: ${error.message.split("\n")[0]}`
-          );
-          if (i === 5) {
-            // [新增截图] 在最终失败时保存截图
-            try {
-              const screenshotPath = path.join(
-                __dirname,
-                "debug_screenshot_final.png"
-              );
-              await this.page.screenshot({
-                path: screenshotPath,
-                fullPage: true,
-              });
-              this.logger.info(
-                `[调试] 最终失败截图已保存到: ${screenshotPath}`
-              );
-            } catch (screenshotError) {
-              this.logger.error(
-                `[调试] 保存截图失败: ${screenshotError.message}`
-              );
-            }
-            throw new Error(`多次尝试后仍无法点击 "Code" 按钮，初始化失败。`);
-          }
-        }
-      }
-
-      this.logger.info(
-        '[Browser] (步骤2/5) "Code" 按钮点击成功，等待编辑器变为可见...'
-      );
-      const editorContainerLocator = this.page
-        .locator("div.monaco-editor")
-        .first();
-      await editorContainerLocator.waitFor({
-        state: "visible",
-        timeout: 60000,
-      });
-
-      this.logger.info(
-        "[Browser] (清场 #2) 准备点击编辑器，再次强行移除所有可能的遮罩层..."
-      );
-      await this.page.evaluate(() => {
-        const overlays = document.querySelectorAll("div.cdk-overlay-backdrop");
-        if (overlays.length > 0) {
-          console.log(
-            `[ProxyClient] (内部JS) 发现并移除了 ${overlays.length} 个新出现的遮罩层。`
-          );
-          overlays.forEach((el) => el.remove());
-        }
-      });
-      await this.page.waitForTimeout(250);
-
-      this.logger.info("[Browser] (步骤3/5) 编辑器已显示，聚焦并粘贴脚本...");
-      await editorContainerLocator.click({ timeout: 30000 });
-
-      await this.page.evaluate(
-        (text) => navigator.clipboard.writeText(text),
-        buildScriptContent
-      );
-      const isMac = os.platform() === "darwin";
-      const pasteKey = isMac ? "Meta+V" : "Control+V";
-      await this.page.keyboard.press(pasteKey);
-      this.logger.info("[Browser] (步骤4/5) 脚本已粘贴。");
-      this.logger.info(
-        '[Browser] (步骤5/5) 正在点击 "Preview" 按钮以使脚本生效...'
-      );
-      await this.page.locator('button:text("Preview")').click();
-      this.logger.info("[Browser] ✅ UI交互完成，脚本已开始运行。");
       this.currentAuthIndex = authIndex;
       this._startBackgroundWakeup();
       this.logger.info("[Browser] (后台任务) 🛡️ 监控进程已启动...");
       await this.page.waitForTimeout(1000);
       this.logger.info(
-        "[Browser] ⚡ 正在发送主动唤醒请求以触发 Launch 流程..."
+        "[Browser] ⚡ 正在发送主动唤醒请求以触发 Launch 流程...",
       );
       try {
         await this.page.evaluate(async () => {
@@ -540,18 +482,18 @@ class BrowserManager {
               {
                 method: "GET",
                 headers: { "Content-Type": "application/json" },
-              }
+              },
             );
           } catch (e) {
             console.log(
-              "[ProxyClient] 主动唤醒请求已发送 (预期内可能会失败，这很正常)"
+              "[ProxyClient] 主动唤醒请求已发送 (预期内可能会失败，这很正常)",
             );
           }
         });
         this.logger.info("[Browser] ⚡ 主动唤醒请求已发送。");
       } catch (e) {
         this.logger.warn(
-          `[Browser] 主动唤醒请求发送异常 (不影响主流程): ${e.message}`
+          `[Browser] 主动唤醒请求发送异常 (不影响主流程): ${e.message}`,
         );
       }
 
@@ -562,7 +504,7 @@ class BrowserManager {
       this._startBackgroundWakeup();
     } catch (error) {
       this.logger.error(
-        `❌ [Browser] 账户 ${authIndex} 的上下文初始化失败: ${error.message}`
+        `❌ [Browser] 账户 ${authIndex} 的上下文初始化失败: ${error.message}`,
       );
       if (this.browser) {
         await this.browser.close();
@@ -585,11 +527,11 @@ class BrowserManager {
 
   async switchAccount(newAuthIndex) {
     this.logger.info(
-      `🔄 [Browser] 开始账号切换: 从 ${this.currentAuthIndex} 到 ${newAuthIndex}`
+      `🔄 [Browser] 开始账号切换: 从 ${this.currentAuthIndex} 到 ${newAuthIndex}`,
     );
     await this.launchOrSwitchContext(newAuthIndex);
     this.logger.info(
-      `✅ [Browser] 账号切换完成，当前账号: ${this.currentAuthIndex}`
+      `✅ [Browser] 账号切换完成，当前账号: ${this.currentAuthIndex}`,
     );
   }
 
@@ -619,8 +561,8 @@ class BrowserManager {
           try {
             const preciseCandidates = Array.from(
               document.querySelectorAll(
-                ".interaction-modal p, .interaction-modal button"
-              )
+                ".interaction-modal p, .interaction-modal button",
+              ),
             );
             for (const el of preciseCandidates) {
               const text = (el.innerText || "").trim();
@@ -655,7 +597,7 @@ class BrowserManager {
 
           // 扫描所有包含关键词的元素
           const candidates = Array.from(
-            document.querySelectorAll("button, span, div, a, i")
+            document.querySelectorAll("button, span, div, a, i"),
           );
 
           for (const el of candidates) {
@@ -705,7 +647,7 @@ class BrowserManager {
           this.logger.info(
             `[Browser] 🎯 锁定目标 [${targetInfo.tagName}] (策略: ${
               targetInfo.strategy === "precise_css" ? "精准定位" : "模糊扫描"
-            })...`
+            })...`,
           );
 
           // === 策略 A: 物理点击 (模拟真实鼠标) ===
@@ -734,7 +676,7 @@ class BrowserManager {
             // 简单粗暴检查页面可视区是否还有那个特定位置的文字
             // 这里为了性能做简化：再次扫描元素
             const els = Array.from(
-              document.querySelectorAll('button, span, div[role="button"]')
+              document.querySelectorAll('button, span, div[role="button"]'),
             );
             return els.some((el) => {
               const r = el.getBoundingClientRect();
@@ -749,7 +691,7 @@ class BrowserManager {
 
           if (isStillThere) {
             this.logger.warn(
-              `[Browser] ⚠️ 物理点击似乎无效（按钮仍在），尝试 JS 强力点击...`
+              `[Browser] ⚠️ 物理点击似乎无效（按钮仍在），尝试 JS 强力点击...`,
             );
 
             // 直接在浏览器内部触发 click 事件
@@ -757,7 +699,7 @@ class BrowserManager {
               const MIN_Y = 400;
               const MAX_Y = 800;
               const candidates = Array.from(
-                document.querySelectorAll('button, span, div[role="button"]')
+                document.querySelectorAll('button, span, div[role="button"]'),
               );
               for (const el of candidates) {
                 const r = el.getBoundingClientRect();
@@ -772,7 +714,7 @@ class BrowserManager {
                     target = target.closest("button");
                   target.click(); // 原生 JS 点击
                   console.log(
-                    "[ProxyClient] JS Click triggered on " + target.tagName
+                    "[ProxyClient] JS Click triggered on " + target.tagName,
                   );
                   return true;
                 }
@@ -911,15 +853,12 @@ class ConnectionRegistry extends EventEmitter {
     // --- 修改结束 ---
 
     this.connections.add(websocket);
-    this.logger.info(
-      `[Server] 内部WebSocket客户端已连接 (来自: ${clientInfo.address})`
-    );
     websocket.on("message", (data) =>
-      this._handleIncomingMessage(data.toString())
+      this._handleIncomingMessage(data.toString()),
     );
     websocket.on("close", () => this._removeConnection(websocket));
     websocket.on("error", (error) =>
-      this.logger.error(`[Server] 内部WebSocket连接错误: ${error.message}`)
+      this.logger.error(`[Server] 内部WebSocket连接错误: ${error.message}`),
     );
     this.emit("connectionAdded", websocket);
   }
@@ -933,7 +872,7 @@ class ConnectionRegistry extends EventEmitter {
     this.reconnectGraceTimer = setTimeout(() => {
       // 5秒后，如果没有新连接进来（即reconnectGraceTimer未被清除），则确认是真实断开
       this.logger.error(
-        "[Server] 缓冲期结束，未检测到重连。确认连接丢失，正在清理所有待处理请求..."
+        "[Server] 缓冲期结束，未检测到重连。确认连接丢失，正在清理所有待处理请求...",
       );
       this.messageQueues.forEach((queue) => queue.close());
       this.messageQueues.clear();
@@ -1008,7 +947,7 @@ class RequestHandler {
     logger,
     browserManager,
     config,
-    authSource
+    authSource,
   ) {
     this.serverSystem = serverSystem;
     this.connectionRegistry = connectionRegistry;
@@ -1041,7 +980,7 @@ class RequestHandler {
 
     if (currentIndexInArray === -1) {
       this.logger.warn(
-        `[Auth] 当前索引 ${this.currentAuthIndex} 不在可用列表中，将切换到第一个可用索引。`
+        `[Auth] 当前索引 ${this.currentAuthIndex} 不在可用列表中，将切换到第一个可用索引。`,
       );
       return available[0];
     }
@@ -1072,7 +1011,7 @@ class RequestHandler {
         const singleIndex = available[0];
         this.logger.info("==================================================");
         this.logger.info(
-          `🔄 [Auth] 单账号模式：达到轮换阈值，正在执行原地重启...`
+          `🔄 [Auth] 单账号模式：达到轮换阈值，正在执行原地重启...`,
         );
         this.logger.info(`   • 目标账号: #${singleIndex}`);
         this.logger.info("==================================================");
@@ -1086,7 +1025,7 @@ class RequestHandler {
           this.usageCount = 0;
 
           this.logger.info(
-            `✅ [Auth] 单账号 #${singleIndex} 重启/刷新成功，使用计数已清零。`
+            `✅ [Auth] 单账号 #${singleIndex} 重启/刷新成功，使用计数已清零。`,
           );
           return { success: true, newIndex: singleIndex };
         } catch (error) {
@@ -1111,15 +1050,15 @@ class RequestHandler {
         this.failureCount = 0;
         this.usageCount = 0;
         this.logger.info(
-          `✅ [Auth] 成功切换到账号 #${this.currentAuthIndex}，计数已重置。`
+          `✅ [Auth] 成功切换到账号 #${this.currentAuthIndex}，计数已重置。`,
         );
         return { success: true, newIndex: this.currentAuthIndex };
       } catch (error) {
         this.logger.error(
-          `❌ [Auth] 切换到账号 #${nextAuthIndex} 失败: ${error.message}`
+          `❌ [Auth] 切换到账号 #${nextAuthIndex} 失败: ${error.message}`,
         );
         this.logger.warn(
-          `🚨 [Auth] 切换失败，正在尝试回退到上一个可用账号 #${previousAuthIndex}...`
+          `🚨 [Auth] 切换失败，正在尝试回退到上一个可用账号 #${previousAuthIndex}...`,
         );
         try {
           await this.browserManager.launchOrSwitchContext(previousAuthIndex);
@@ -1134,7 +1073,7 @@ class RequestHandler {
           };
         } catch (fallbackError) {
           this.logger.error(
-            `FATAL: ❌❌❌ [Auth] 紧急回退到账号 #${previousAuthIndex} 也失败了！服务可能中断。`
+            `FATAL: ❌❌❌ [Auth] 紧急回退到账号 #${previousAuthIndex} 也失败了！服务可能中断。`,
           );
           throw fallbackError;
         }
@@ -1165,12 +1104,12 @@ class RequestHandler {
       this.failureCount = 0;
       this.usageCount = 0;
       this.logger.info(
-        `✅ [Auth] 成功切换到账号 #${this.currentAuthIndex}，计数已重置。`
+        `✅ [Auth] 成功切换到账号 #${this.currentAuthIndex}，计数已重置。`,
       );
       return { success: true, newIndex: this.currentAuthIndex };
     } catch (error) {
       this.logger.error(
-        `❌ [Auth] 切换到指定账号 #${targetIndex} 失败: ${error.message}`
+        `❌ [Auth] 切换到指定账号 #${targetIndex} 失败: ${error.message}`,
       );
       // 对于指定切换，失败了就直接报错，不进行回退，让用户知道这个账号有问题
       throw error;
@@ -1185,12 +1124,12 @@ class RequestHandler {
     if (this.config.failureThreshold > 0) {
       this.failureCount++;
       this.logger.warn(
-        `⚠️ [Auth] 请求失败 - 失败计数: ${this.failureCount}/${this.config.failureThreshold} (当前账号索引: ${this.currentAuthIndex})`
+        `⚠️ [Auth] 请求失败 - 失败计数: ${this.failureCount}/${this.config.failureThreshold} (当前账号索引: ${this.currentAuthIndex})`,
       );
     }
 
     const isImmediateSwitch = this.config.immediateSwitchStatusCodes.includes(
-      errorDetails.status
+      errorDetails.status,
     );
     const isThresholdReached =
       this.config.failureThreshold > 0 &&
@@ -1200,11 +1139,11 @@ class RequestHandler {
     if (isImmediateSwitch || isThresholdReached) {
       if (isImmediateSwitch) {
         this.logger.warn(
-          `🔴 [Auth] 收到状态码 ${errorDetails.status}，触发立即切换账号...`
+          `🔴 [Auth] 收到状态码 ${errorDetails.status}，触发立即切换账号...`,
         );
       } else {
         this.logger.warn(
-          `🔴 [Auth] 达到失败阈值 (${this.failureCount}/${this.config.failureThreshold})！准备切换账号...`
+          `🔴 [Auth] 达到失败阈值 (${this.failureCount}/${this.config.failureThreshold})！准备切换账号...`,
         );
       }
 
@@ -1247,7 +1186,7 @@ class RequestHandler {
     res.on("close", () => {
       if (!res.writableEnded) {
         this.logger.warn(
-          `[Request] 客户端已提前关闭请求 #${requestId} 的连接。`
+          `[Request] 客户端已提前关闭请求 #${requestId} 的连接。`,
         );
         this._cancelBrowserRequest(requestId);
       }
@@ -1256,17 +1195,17 @@ class RequestHandler {
     if (!this.connectionRegistry.hasActiveConnections()) {
       if (this.isSystemBusy) {
         this.logger.warn(
-          "[System] 检测到连接断开，但系统正在进行切换/恢复，拒绝新请求。"
+          "[System] 检测到连接断开，但系统正在进行切换/恢复，拒绝新请求。",
         );
         return this._sendErrorResponse(
           res,
           503,
-          "服务器正在进行内部维护（账号切换/恢复），请稍后重试。"
+          "服务器正在进行内部维护（账号切换/恢复），请稍后重试。",
         );
       }
 
       this.logger.error(
-        "❌ [System] 检测到浏览器WebSocket连接已断开！可能是进程崩溃。正在尝试恢复..."
+        "❌ [System] 检测到浏览器WebSocket连接已断开！可能是进程崩溃。正在尝试恢复...",
       );
       // --- 开始恢复前，加锁！ ---
       this.isSystemBusy = true;
@@ -1278,7 +1217,7 @@ class RequestHandler {
         return this._sendErrorResponse(
           res,
           503,
-          "服务暂时不可用：后端浏览器实例崩溃且无法自动恢复，请联系管理员。"
+          "服务暂时不可用：后端浏览器实例崩溃且无法自动恢复，请联系管理员。",
         );
       } finally {
         // --- 恢复结束后，解锁！ ---
@@ -1288,12 +1227,12 @@ class RequestHandler {
 
     if (this.isSystemBusy) {
       this.logger.warn(
-        "[System] 收到新请求，但系统正在进行切换/恢复，拒绝新请求。"
+        "[System] 收到新请求，但系统正在进行切换/恢复，拒绝新请求。",
       );
       return this._sendErrorResponse(
         res,
         503,
-        "服务器正在进行内部维护（账号切换/恢复），请稍后重试。"
+        "服务器正在进行内部维护（账号切换/恢复），请稍后重试。",
       );
     }
 
@@ -1304,7 +1243,7 @@ class RequestHandler {
     if (this.config.switchOnUses > 0 && isGenerativeRequest) {
       this.usageCount++;
       this.logger.info(
-        `[Request] 生成请求 - 账号轮换计数: ${this.usageCount}/${this.config.switchOnUses} (当前账号: ${this.currentAuthIndex})`
+        `[Request] 生成请求 - 账号轮换计数: ${this.usageCount}/${this.config.switchOnUses} (当前账号: ${this.currentAuthIndex})`,
       );
       if (this.usageCount >= this.config.switchOnUses) {
         this.needsSwitchingAfterRequest = true;
@@ -1324,14 +1263,14 @@ class RequestHandler {
       if (wantsStream) {
         // --- 客户端想要流式响应 ---
         this.logger.info(
-          `[Request] 客户端启用流式传输 (${this.serverSystem.streamingMode})，进入流式处理模式...`
+          `[Request] 客户端启用流式传输 (${this.serverSystem.streamingMode})，进入流式处理模式...`,
         );
         if (this.serverSystem.streamingMode === "fake") {
           await this._handlePseudoStreamResponse(
             proxyRequest,
             messageQueue,
             req,
-            res
+            res,
           );
         } else {
           await this._handleRealStreamResponse(proxyRequest, messageQueue, res);
@@ -1348,7 +1287,7 @@ class RequestHandler {
       this.connectionRegistry.removeMessageQueue(requestId);
       if (this.needsSwitchingAfterRequest) {
         this.logger.info(
-          `[Auth] 轮换计数已达到切换阈值 (${this.usageCount}/${this.config.switchOnUses})，将在后台自动切换账号...`
+          `[Auth] 轮换计数已达到切换阈值 (${this.usageCount}/${this.config.switchOnUses})，将在后台自动切换账号...`,
         );
         this._switchToNextAuth().catch((err) => {
           this.logger.error(`[Auth] 后台账号切换任务失败: ${err.message}`);
@@ -1371,7 +1310,7 @@ class RequestHandler {
     if (this.config.switchOnUses > 0) {
       this.usageCount++;
       this.logger.info(
-        `[Request] OpenAI生成请求 - 账号轮换计数: ${this.usageCount}/${this.config.switchOnUses} (当前账号: ${this.currentAuthIndex})`
+        `[Request] OpenAI生成请求 - 账号轮换计数: ${this.usageCount}/${this.config.switchOnUses} (当前账号: ${this.currentAuthIndex})`,
       );
       if (this.usageCount >= this.config.switchOnUses) {
         this.needsSwitchingAfterRequest = true;
@@ -1386,7 +1325,7 @@ class RequestHandler {
       return this._sendErrorResponse(
         res,
         400,
-        "Invalid OpenAI request format."
+        "Invalid OpenAI request format.",
       );
     }
 
@@ -1412,7 +1351,7 @@ class RequestHandler {
 
       if (initialMessage.event_type === "error") {
         this.logger.error(
-          `[Adapter] 收到来自浏览器的错误，将触发切换逻辑。状态码: ${initialMessage.status}, 消息: ${initialMessage.message}`
+          `[Adapter] 收到来自浏览器的错误，将触发切换逻辑。状态码: ${initialMessage.status}, 消息: ${initialMessage.message}`,
         );
         await this._handleRequestFailureAndSwitch(initialMessage, res);
         if (isOpenAIStream) {
@@ -1424,7 +1363,7 @@ class RequestHandler {
           this._sendErrorResponse(
             res,
             initialMessage.status || 500,
-            initialMessage.message
+            initialMessage.message,
           );
         }
         return;
@@ -1432,7 +1371,7 @@ class RequestHandler {
 
       if (this.failureCount > 0) {
         this.logger.info(
-          `✅ [Auth] OpenAI接口请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`
+          `✅ [Auth] OpenAI接口请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`,
         );
         this.failureCount = 0;
       }
@@ -1476,7 +1415,7 @@ class RequestHandler {
               const translatedChunk = this._translateGoogleToOpenAIStream(
                 message.data,
                 model,
-                streamState
+                streamState,
               );
               if (translatedChunk) {
                 res.write(translatedChunk);
@@ -1496,14 +1435,14 @@ class RequestHandler {
 
           const translatedChunk = this._translateGoogleToOpenAIStream(
             fullBody,
-            model
+            model,
           );
           if (translatedChunk) {
             res.write(translatedChunk);
           }
           res.write("data: [DONE]\n\n");
           this.logger.info(
-            `[Adapter] Fake模式：已一次性发送完整内容并结束流。`
+            `[Adapter] Fake模式：已一次性发送完整内容并结束流。`,
           );
         }
       } else {
@@ -1532,7 +1471,7 @@ class RequestHandler {
             const image = imagePart.inlineData;
             responseContent = `![Generated Image](data:${image.mimeType};base64,${image.data})`;
             this.logger.info(
-              "[Adapter] 从 parts.inlineData 中成功解析到图片。"
+              "[Adapter] 从 parts.inlineData 中成功解析到图片。",
             );
           } else {
             let mainContent = "";
@@ -1574,7 +1513,7 @@ class RequestHandler {
 
         const finishReason = candidate?.finishReason || "UNKNOWN";
         this.logger.info(
-          `✅ [Request] OpenAI非流式响应结束，原因: ${finishReason}，请求ID: ${requestId}`
+          `✅ [Request] OpenAI非流式响应结束，原因: ${finishReason}，请求ID: ${requestId}`,
         );
 
         res.status(200).json(openaiResponse);
@@ -1585,7 +1524,7 @@ class RequestHandler {
       this.connectionRegistry.removeMessageQueue(requestId);
       if (this.needsSwitchingAfterRequest) {
         this.logger.info(
-          `[Auth] OpenAI轮换计数已达到切换阈值 (${this.usageCount}/${this.config.switchOnUses})，将在后台自动切换账号...`
+          `[Auth] OpenAI轮换计数已达到切换阈值 (${this.usageCount}/${this.config.switchOnUses})，将在后台自动切换账号...`,
         );
         this._switchToNextAuth().catch((err) => {
           this.logger.error(`[Auth] 后台账号切换任务失败: ${err.message}`);
@@ -1603,17 +1542,17 @@ class RequestHandler {
     const connection = this.connectionRegistry.getFirstConnection();
     if (connection) {
       this.logger.info(
-        `[Request] 正在向浏览器发送取消请求 #${requestId} 的指令...`
+        `[Request] 正在向浏览器发送取消请求 #${requestId} 的指令...`,
       );
       connection.send(
         JSON.stringify({
           event_type: "cancel_request",
           request_id: requestId,
-        })
+        }),
       );
     } else {
       this.logger.warn(
-        `[Request] 无法发送取消指令：没有可用的浏览器WebSocket连接。`
+        `[Request] 无法发送取消指令：没有可用的浏览器WebSocket连接。`,
       );
     }
   }
@@ -1635,12 +1574,12 @@ class RequestHandler {
 
       if (!bodyObj.generationConfig.thinkingConfig) {
         this.logger.info(
-          `[Proxy] ⚠️ (Google原生格式) 强制推理已启用，且客户端未提供配置，正在注入 thinkingConfig...`
+          `[Proxy] ⚠️ (Google原生格式) 强制推理已启用，且客户端未提供配置，正在注入 thinkingConfig...`,
         );
         bodyObj.generationConfig.thinkingConfig = { includeThoughts: true };
       } else {
         this.logger.info(
-          `[Proxy] ✅ (Google原生格式) 检测到客户端自带推理配置，跳过强制注入。`
+          `[Proxy] ✅ (Google原生格式) 检测到客户端自带推理配置，跳过强制注入。`,
         );
       }
     }
@@ -1685,7 +1624,7 @@ class RequestHandler {
 
   async _handlePseudoStreamResponse(proxyRequest, messageQueue, req, res) {
     this.logger.info(
-      "[Request] 客户端启用流式传输 (fake)，进入伪流式处理模式..."
+      "[Request] 客户端启用流式传输 (fake)，进入伪流式处理模式...",
     );
     res.status(200).set({
       "Content-Type": "text/event-stream",
@@ -1704,7 +1643,7 @@ class RequestHandler {
       for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
         if (attempt > 1) {
           this.logger.info(
-            `[Request] 请求尝试 #${attempt}/${this.maxRetries}...`
+            `[Request] 请求尝试 #${attempt}/${this.maxRetries}...`,
           );
         }
         this._forwardRequest(proxyRequest);
@@ -1713,10 +1652,12 @@ class RequestHandler {
             setTimeout(
               () =>
                 reject(
-                  new Error("Response from browser timed out after 300 seconds")
+                  new Error(
+                    "Response from browser timed out after 300 seconds",
+                  ),
                 ),
-              300000
-            )
+              300000,
+            ),
           );
           lastMessage = await Promise.race([
             messageQueue.dequeue(),
@@ -1743,13 +1684,13 @@ class RequestHandler {
             this.logger.warn(
               `[Request] 尝试 #${attempt} 失败: 收到 ${
                 lastMessage.status || "未知"
-              } 错误。 - ${lastMessage.message}`
+              } 错误。 - ${lastMessage.message}`,
             );
           }
 
           if (attempt < this.maxRetries) {
             await new Promise((resolve) =>
-              setTimeout(resolve, this.retryDelay)
+              setTimeout(resolve, this.retryDelay),
             );
             continue;
           }
@@ -1765,16 +1706,16 @@ class RequestHandler {
           lastMessage.message.includes("The user aborted a request")
         ) {
           this.logger.info(
-            `[Request] 请求 #${proxyRequest.request_id} 已由用户妥善取消，不计入失败统计。`
+            `[Request] 请求 #${proxyRequest.request_id} 已由用户妥善取消，不计入失败统计。`,
           );
         } else {
           this.logger.error(
-            `[Request] 所有 ${this.maxRetries} 次重试均失败，将计入失败统计。`
+            `[Request] 所有 ${this.maxRetries} 次重试均失败，将计入失败统计。`,
           );
           await this._handleRequestFailureAndSwitch(lastMessage, res);
           this._sendErrorChunkToClient(
             res,
-            `请求最终失败: ${lastMessage.message}`
+            `请求最终失败: ${lastMessage.message}`,
           );
         }
         return;
@@ -1783,7 +1724,7 @@ class RequestHandler {
       // 成功的逻辑
       if (proxyRequest.is_generative && this.failureCount > 0) {
         this.logger.info(
-          `✅ [Auth] 生成请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`
+          `✅ [Auth] 生成请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`,
         );
         this.failureCount = 0;
       }
@@ -1800,7 +1741,7 @@ class RequestHandler {
         const finishReason =
           fullResponse.candidates?.[0]?.finishReason || "UNKNOWN";
         this.logger.info(
-          `✅ [Request] 响应结束，原因: ${finishReason}，请求ID: ${proxyRequest.request_id}`
+          `✅ [Request] 响应结束，原因: ${finishReason}，请求ID: ${proxyRequest.request_id}`,
         );
       } catch (e) {}
       res.write("data: [DONE]\n\n");
@@ -1812,7 +1753,7 @@ class RequestHandler {
         res.end();
       }
       this.logger.info(
-        `[Request] 响应处理结束，请求ID: ${proxyRequest.request_id}`
+        `[Request] 响应处理结束，请求ID: ${proxyRequest.request_id}`,
       );
     }
   }
@@ -1828,7 +1769,7 @@ class RequestHandler {
         headerMessage.message.includes("The user aborted a request")
       ) {
         this.logger.info(
-          `[Request] 请求 #${proxyRequest.request_id} 已被用户妥善取消，不计入失败统计。`
+          `[Request] 请求 #${proxyRequest.request_id} 已被用户妥善取消，不计入失败统计。`,
         );
       } else {
         this.logger.error(`[Request] 请求失败，将计入失败统计。`);
@@ -1836,7 +1777,7 @@ class RequestHandler {
         return this._sendErrorResponse(
           res,
           headerMessage.status,
-          headerMessage.message
+          headerMessage.message,
         );
       }
       if (!res.writableEnded) res.end();
@@ -1846,7 +1787,7 @@ class RequestHandler {
     // --- 核心修改：只有在生成请求成功时，才重置失败计数 ---
     if (proxyRequest.is_generative && this.failureCount > 0) {
       this.logger.info(
-        `✅ [Auth] 生成请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`
+        `✅ [Auth] 生成请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`,
       );
       this.failureCount = 0;
     }
@@ -1875,7 +1816,7 @@ class RequestHandler {
             const finishReason =
               lastResponse.candidates?.[0]?.finishReason || "UNKNOWN";
             this.logger.info(
-              `✅ [Request] 响应结束，原因: ${finishReason}，请求ID: ${proxyRequest.request_id}`
+              `✅ [Request] 响应结束，原因: ${finishReason}，请求ID: ${proxyRequest.request_id}`,
             );
           }
         }
@@ -1886,7 +1827,7 @@ class RequestHandler {
     } finally {
       if (!res.writableEnded) res.end();
       this.logger.info(
-        `[Request] 真流式响应连接已关闭，请求ID: ${proxyRequest.request_id}`
+        `[Request] 真流式响应连接已关闭，请求ID: ${proxyRequest.request_id}`,
       );
     }
   }
@@ -1904,18 +1845,18 @@ class RequestHandler {
         // ... (错误处理逻辑保持不变)
         if (headerMessage.message?.includes("The user aborted a request")) {
           this.logger.info(
-            `[Request] 请求 #${proxyRequest.request_id} 已被用户妥善取消。`
+            `[Request] 请求 #${proxyRequest.request_id} 已被用户妥善取消。`,
           );
         } else {
           this.logger.error(
-            `[Request] 浏览器端返回错误: ${headerMessage.message}`
+            `[Request] 浏览器端返回错误: ${headerMessage.message}`,
           );
           await this._handleRequestFailureAndSwitch(headerMessage, null);
         }
         return this._sendErrorResponse(
           res,
           headerMessage.status || 500,
-          headerMessage.message
+          headerMessage.message,
         );
       }
 
@@ -1935,7 +1876,7 @@ class RequestHandler {
       // 3. 重置失败计数器（如果需要）
       if (proxyRequest.is_generative && this.failureCount > 0) {
         this.logger.info(
-          `✅ [Auth] 非流式生成请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`
+          `✅ [Auth] 非流式生成请求成功 - 失败计数已从 ${this.failureCount} 重置为 0`,
         );
         this.failureCount = 0;
       }
@@ -1948,12 +1889,12 @@ class RequestHandler {
         const candidate = parsedBody.candidates?.[0];
         if (candidate?.content?.parts) {
           const imagePartIndex = candidate.content.parts.findIndex(
-            (p) => p.inlineData
+            (p) => p.inlineData,
           );
 
           if (imagePartIndex > -1) {
             this.logger.info(
-              "[Proxy] 检测到Google格式响应中的图片数据，正在转换为Markdown..."
+              "[Proxy] 检测到Google格式响应中的图片数据，正在转换为Markdown...",
             );
             const imagePart = candidate.content.parts[imagePartIndex];
             const image = imagePart.inlineData;
@@ -1974,7 +1915,7 @@ class RequestHandler {
         }
       } catch (e) {
         this.logger.warn(
-          `[Proxy] 响应体不是有效的JSON，或在处理图片时出错: ${e.message}`
+          `[Proxy] 响应体不是有效的JSON，或在处理图片时出错: ${e.message}`,
         );
         // 如果出错，则什么都不做，直接发送原始的 fullBody
       }
@@ -1984,7 +1925,7 @@ class RequestHandler {
         const finishReason =
           fullResponse.candidates?.[0]?.finishReason || "UNKNOWN";
         this.logger.info(
-          `✅ [Request] 响应结束，原因: ${finishReason}，请求ID: ${proxyRequest.request_id}`
+          `✅ [Request] 响应结束，原因: ${finishReason}，请求ID: ${proxyRequest.request_id}`,
         );
       } catch (e) {}
 
@@ -2076,7 +2017,7 @@ class RequestHandler {
 
     // 1. 分离出 system 指令
     const systemMessages = openaiBody.messages.filter(
-      (msg) => msg.role === "system"
+      (msg) => msg.role === "system",
     );
     if (systemMessages.length > 0) {
       // 将所有 system message 的内容合并
@@ -2090,7 +2031,7 @@ class RequestHandler {
 
     // 2. 转换 user 和 assistant 消息
     const conversationMessages = openaiBody.messages.filter(
-      (msg) => msg.role !== "system"
+      (msg) => msg.role !== "system",
     );
     for (const message of conversationMessages) {
       const googleParts = [];
@@ -2175,7 +2116,7 @@ class RequestHandler {
       //}
 
       this.logger.info(
-        `[Adapter] 成功提取并转换推理配置: ${JSON.stringify(thinkingConfig)}`
+        `[Adapter] 成功提取并转换推理配置: ${JSON.stringify(thinkingConfig)}`,
       );
     }
 
@@ -2184,7 +2125,7 @@ class RequestHandler {
       const effort = openaiBody.reasoning_effort || extraBody.reasoning_effort;
       if (effort) {
         this.logger.info(
-          `[Adapter] 检测到 OpenAI 标准推理参数 (reasoning_effort: ${effort})，自动转换为 Google 格式。`
+          `[Adapter] 检测到 OpenAI 标准推理参数 (reasoning_effort: ${effort})，自动转换为 Google 格式。`,
         );
         thinkingConfig = { includeThoughts: true };
       }
@@ -2193,7 +2134,7 @@ class RequestHandler {
     // 4. 强制开启逻辑 (WebUI开关)
     if (this.serverSystem.forceThinking && !thinkingConfig) {
       this.logger.info(
-        "[Adapter] ⚠️ 强制推理已启用，且客户端未提供配置，正在注入 thinkingConfig..."
+        "[Adapter] ⚠️ 强制推理已启用，且客户端未提供配置，正在注入 thinkingConfig...",
       );
       thinkingConfig = { includeThoughts: true };
     }
@@ -2242,8 +2183,8 @@ class RequestHandler {
       if (googleResponse.promptFeedback) {
         this.logger.warn(
           `[Adapter] Google返回了promptFeedback，可能已被拦截: ${JSON.stringify(
-            googleResponse.promptFeedback
-          )}`
+            googleResponse.promptFeedback,
+          )}`,
         );
         const errorText = `[ProxySystem Error] Request blocked due to safety settings. Finish Reason: ${googleResponse.promptFeedback.blockReason}`;
         return `data: ${JSON.stringify({
@@ -2328,7 +2269,7 @@ class ProxyServerSystem extends EventEmitter {
     this.browserManager = new BrowserManager(
       this.logger,
       this.config,
-      this.authSource
+      this.authSource,
     );
     this.connectionRegistry = new ConnectionRegistry(this.logger);
     this.requestHandler = new RequestHandler(
@@ -2337,7 +2278,7 @@ class ProxyServerSystem extends EventEmitter {
       this.logger,
       this.browserManager,
       this.config,
-      this.authSource
+      this.authSource,
     );
 
     this.httpServer = null;
@@ -2361,6 +2302,7 @@ class ProxyServerSystem extends EventEmitter {
       immediateSwitchStatusCodes: [429, 503],
       // [新增] 用于追踪API密钥来源
       apiKeySource: "未设置",
+      targetUrl: "https://ai.studio/apps/59d6e5ae-e3bb-494d-b942-2da1adab2ba0",
     };
 
     const configPath = path.join(__dirname, "config.json");
@@ -2377,6 +2319,7 @@ class ProxyServerSystem extends EventEmitter {
     if (process.env.PORT)
       config.httpPort = parseInt(process.env.PORT, 10) || config.httpPort;
     if (process.env.HOST) config.host = process.env.HOST;
+    if (process.env.TARGET_URL) config.targetUrl = process.env.TARGET_URL;
     if (process.env.STREAMING_MODE)
       config.streamingMode = process.env.STREAMING_MODE;
     if (process.env.FAILURE_THRESHOLD)
@@ -2444,17 +2387,17 @@ class ProxyServerSystem extends EventEmitter {
         const modelsFileContent = fs.readFileSync(modelsPath, "utf-8");
         config.modelList = JSON.parse(modelsFileContent); // 将读取到的模型列表存入config对象
         this.logger.info(
-          `[System] 已从 models.json 成功加载 ${config.modelList.length} 个模型。`
+          `[System] 已从 models.json 成功加载 ${config.modelList.length} 个模型。`,
         );
       } else {
         this.logger.warn(
-          `[System] 未找到 models.json 文件，将使用默认模型列表。`
+          `[System] 未找到 models.json 文件，将使用默认模型列表。`,
         );
         config.modelList = ["gemini-1.5-pro-latest"]; // 提供一个备用模型，防止服务启动失败
       }
     } catch (error) {
       this.logger.error(
-        `[System] 读取或解析 models.json 失败: ${error.message}，将使用默认模型列表。`
+        `[System] 读取或解析 models.json 失败: ${error.message}，将使用默认模型列表。`,
       );
       config.modelList = ["gemini-1.5-pro-latest"]; // 出错时也使用备用模型
     }
@@ -2469,27 +2412,27 @@ class ProxyServerSystem extends EventEmitter {
         this.config.switchOnUses > 0
           ? `每 ${this.config.switchOnUses} 次请求后切换`
           : "已禁用"
-      }`
+      }`,
     );
     this.logger.info(
       `  失败计数切换: ${
         this.config.failureThreshold > 0
           ? `失败${this.config.failureThreshold} 次后切换`
           : "已禁用"
-      }`
+      }`,
     );
     this.logger.info(
       `  立即切换报错码: ${
         this.config.immediateSwitchStatusCodes.length > 0
           ? this.config.immediateSwitchStatusCodes.join(", ")
           : "已禁用"
-      }`
+      }`,
     );
     this.logger.info(`  单次请求最大重试: ${this.config.maxRetries}次`);
     this.logger.info(`  重试间隔: ${this.config.retryDelay}ms`);
     this.logger.info(`  API 密钥来源: ${this.config.apiKeySource}`); // 在启动日志中也显示出来
     this.logger.info(
-      "============================================================="
+      "=============================================================",
     );
   }
 
@@ -2509,7 +2452,7 @@ class ProxyServerSystem extends EventEmitter {
     let startupOrder = [...allAvailableIndices];
     if (initialAuthIndex && allAvailableIndices.includes(initialAuthIndex)) {
       this.logger.info(
-        `[System] 检测到指定启动索引 #${initialAuthIndex}，将优先尝试。`
+        `[System] 检测到指定启动索引 #${initialAuthIndex}，将优先尝试。`,
       );
       // 将指定索引放到数组第一位，其他索引保持原状
       startupOrder = [
@@ -2519,13 +2462,13 @@ class ProxyServerSystem extends EventEmitter {
     } else {
       if (initialAuthIndex) {
         this.logger.warn(
-          `[System] 指定的启动索引 #${initialAuthIndex} 无效或不可用，将按默认顺序启动。`
+          `[System] 指定的启动索引 #${initialAuthIndex} 无效或不可用，将按默认顺序启动。`,
         );
       }
       this.logger.info(
         `[System] 未指定有效启动索引，将按默认顺序 [${startupOrder.join(
-          ", "
-        )}] 尝试。`
+          ", ",
+        )}] 尝试。`,
       );
     }
 
@@ -2541,7 +2484,7 @@ class ProxyServerSystem extends EventEmitter {
         break; // 成功启动，跳出循环
       } catch (error) {
         this.logger.error(
-          `[System] ❌ 使用账号 #${index} 启动失败。原因: ${error.message}`
+          `[System] ❌ 使用账号 #${index} 启动失败。原因: ${error.message}`,
         );
         // 失败了，循环将继续，尝试下一个账号
       }
@@ -2582,7 +2525,7 @@ class ProxyServerSystem extends EventEmitter {
         this.logger.info(
           `[Auth] API Key验证通过 (来自: ${
             req.headers["x-forwarded-for"] || req.ip
-          })`
+          })`,
         );
         if (req.query.key) {
           delete req.query.key;
@@ -2595,7 +2538,7 @@ class ProxyServerSystem extends EventEmitter {
       if (req.path !== "/favicon.ico") {
         const clientIp = req.headers["x-forwarded-for"] || req.ip;
         this.logger.warn(
-          `[Auth] 访问密码错误或缺失，已拒绝请求。IP: ${clientIp}, Path: ${req.path}`
+          `[Auth] 访问密码错误或缺失，已拒绝请求。IP: ${clientIp}, Path: ${req.path}`,
         );
       }
 
@@ -2619,12 +2562,12 @@ class ProxyServerSystem extends EventEmitter {
     return new Promise((resolve) => {
       this.httpServer.listen(this.config.httpPort, this.config.host, () => {
         this.logger.info(
-          `[System] HTTP服务器已在 http://${this.config.host}:${this.config.httpPort} 上监听`
+          `[System] HTTP服务器已在 http://${this.config.host}:${this.config.httpPort} 上监听`,
         );
         this.logger.info(
           `[System] Keep-Alive 超时已设置为 ${
             this.httpServer.keepAliveTimeout / 1000
-          } 秒。`
+          } 秒。`,
         );
         resolve();
       });
@@ -2638,11 +2581,11 @@ class ProxyServerSystem extends EventEmitter {
       res.header("Access-Control-Allow-Origin", "*");
       res.header(
         "Access-Control-Allow-Methods",
-        "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+        "GET, POST, PUT, DELETE, PATCH, OPTIONS",
       );
       res.header(
         "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, x-requested-with, x-api-key, x-goog-api-key, origin, accept"
+        "Content-Type, Authorization, x-requested-with, x-api-key, x-goog-api-key, origin, accept",
       );
       if (req.method === "OPTIONS") {
         return res.sendStatus(204);
@@ -2658,7 +2601,7 @@ class ProxyServerSystem extends EventEmitter {
         req.path !== "/login"
       ) {
         this.logger.info(
-          `[Entrypoint] 收到一个请求: ${req.method} ${req.path}`
+          `[Entrypoint] 收到一个请求: ${req.method} ${req.path}`,
         );
       }
       next();
@@ -2677,7 +2620,7 @@ class ProxyServerSystem extends EventEmitter {
         resave: false,
         saveUninitialized: true,
         cookie: { secure: false, maxAge: 86400000 },
-      })
+      }),
     );
     const isAuthenticated = (req, res, next) => {
       if (req.session.isAuthenticated) {
@@ -2717,7 +2660,7 @@ class ProxyServerSystem extends EventEmitter {
       const initialIndices = authSource.initialIndices || [];
       const availableIndices = authSource.availableIndices || [];
       const invalidIndices = initialIndices.filter(
-        (i) => !availableIndices.includes(i)
+        (i) => !availableIndices.includes(i),
       );
       const logs = this.logger.logBuffer || [];
 
@@ -2800,11 +2743,11 @@ class ProxyServerSystem extends EventEmitter {
         config.failureThreshold > 0 ? config.failureThreshold : "N/A"
       }
 <span class="label">扫描到的总帐号</span>: [${initialIndices.join(
-        ", "
+        ", ",
       )}] (总数: ${initialIndices.length})
       ${accountDetailsHtml}
 <span class="label">格式错误 (已忽略)</span>: [${invalidIndices.join(
-        ", "
+        ", ",
       )}] (总数: ${invalidIndices.length})
             </pre>
         </div>
@@ -2917,7 +2860,7 @@ class ProxyServerSystem extends EventEmitter {
       const { config, requestHandler, authSource, browserManager } = this;
       const initialIndices = authSource.initialIndices || [];
       const invalidIndices = initialIndices.filter(
-        (i) => !authSource.availableIndices.includes(i)
+        (i) => !authSource.availableIndices.includes(i),
       );
       const logs = this.logger.logBuffer || [];
       const accountNameMap = authSource.accountNameMap;
@@ -2964,11 +2907,10 @@ class ProxyServerSystem extends EventEmitter {
         const { targetIndex } = req.body;
         if (targetIndex !== undefined && targetIndex !== null) {
           this.logger.info(
-            `[WebUI] 收到切换到指定账号 #${targetIndex} 的请求...`
+            `[WebUI] 收到切换到指定账号 #${targetIndex} 的请求...`,
           );
-          const result = await this.requestHandler._switchToSpecificAuth(
-            targetIndex
-          );
+          const result =
+            await this.requestHandler._switchToSpecificAuth(targetIndex);
           if (result.success) {
             res.status(200).send(`切换成功！已激活账号 #${result.newIndex}。`);
           } else {
@@ -3005,7 +2947,7 @@ class ProxyServerSystem extends EventEmitter {
       if (newMode === "fake" || newMode === "real") {
         this.streamingMode = newMode;
         this.logger.info(
-          `[WebUI] 流式模式已由认证用户切换为: ${this.streamingMode}`
+          `[WebUI] 流式模式已由认证用户切换为: ${this.streamingMode}`,
         );
         res.status(200).send(`流式模式已切换为: ${this.streamingMode}`);
       } else {
@@ -3081,4 +3023,3 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
-
