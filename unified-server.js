@@ -28,7 +28,7 @@ class AuthSource {
       );
     } else {
       this.logger.info(
-        '[Auth] 未检测到环境变量认证，将使用 "auth/" 目录下的文件。',
+        '[Auth] 未检测到环境变量的认证信息，将使用 "auth/" 目录下的文件。',
       );
     }
 
@@ -3023,3 +3023,4 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
+
