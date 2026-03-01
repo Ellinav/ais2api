@@ -1641,6 +1641,54 @@ class RequestHandler {
       }
     }
 
+    // 强制联网搜索和URL上下文 (Native Google Format)
+    if (
+      (this.serverSystem.forceWebSearch || this.serverSystem.forceUrlContext) &&
+      req.method === "POST" &&
+      bodyObj &&
+      bodyObj.contents
+    ) {
+      if (!bodyObj.tools) {
+        bodyObj.tools = [];
+      }
+
+      const toolsToAdd = [];
+
+      // 处理 Google Search
+      if (this.serverSystem.forceWebSearch) {
+        const hasSearch = bodyObj.tools.some((t) => t.googleSearch);
+        if (!hasSearch) {
+          bodyObj.tools.push({googleSearch: {}});
+          toolsToAdd.push("googleSearch");
+        } else {
+          this.logger.info(
+            `[Proxy] ✅ (Google原生格式) 检测到客户端自带联网搜索，跳过强制注入。`
+          );
+        }
+      }
+
+      // 处理 URL Context
+      if (this.serverSystem.forceUrlContext) {
+        const hasUrlContext = bodyObj.tools.some((t) => t.urlContext);
+        if (!hasUrlContext) {
+          bodyObj.tools.push({urlContext: {}});
+          toolsToAdd.push("urlContext");
+        } else {
+          this.logger.info(
+            `[Proxy] ✅ (Google原生格式) 检测到客户端自带网址上下文，跳过强制注入。`
+          );
+        }
+      }
+
+      if (toolsToAdd.length > 0) {
+        this.logger.info(
+          `[Proxy] ⚠️ (Google原生格式) 强制功能已启用，正在注入工具: [${toolsToAdd.join(
+            ", "
+          )}]`
+        );
+      }
+    }
+
     let requestBody = "";
     if (bodyObj) {
       requestBody = JSON.stringify(bodyObj);
@@ -2211,6 +2259,43 @@ class RequestHandler {
       { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
     ];
 
+    // 强制联网搜索和URL上下文
+    if (
+      (this.serverSystem.forceWebSearch || this.serverSystem.forceUrlContext)
+    ) {
+      if (!googleRequest.tools) {
+        googleRequest.tools = [];
+      }
+
+      const toolsToAdd = [];
+
+      // 处理 Google Search
+      if (this.serverSystem.forceWebSearch) {
+        const hasSearch = googleRequest.tools.some((t) => t.googleSearch);
+        if (!hasSearch) {
+          googleRequest.tools.push({googleSearch: {}});
+          toolsToAdd.push("googleSearch");
+        }
+      }
+
+      // 处理 URL Context
+      if (this.serverSystem.forceUrlContext) {
+        const hasUrlContext = googleRequest.tools.some((t) => t.urlContext);
+        if (!hasUrlContext) {
+          googleRequest.tools.push({urlContext: {}});
+          toolsToAdd.push("urlContext");
+        }
+      }
+
+      if (toolsToAdd.length > 0) {
+        this.logger.info(
+          `[Adapter] ⚠️ 强制功能已启用，正在注入工具: [${toolsToAdd.join(
+            ", "
+          )}]`
+        );
+      }
+    }
+
     this.logger.info("[Adapter] 翻译完成。");
     return googleRequest;
   }
@@ -2320,7 +2405,9 @@ class ProxyServerSystem extends EventEmitter {
     this._loadConfiguration(); // 这个函数会执行下面的_loadConfiguration
     this.streamingMode = this.config.streamingMode;
 
-    this.forceThinking = false;
+    this.forceThinking = process.env.FORCE_THINKING === "true";
+    this.forceWebSearch = process.env.FORCE_WEB_SEARCH === "true";
+    this.forceUrlContext = process.env.FORCE_URL_CONTEXT === "true";
 
     this.authSource = new AuthSource(this.logger);
     this.browserManager = new BrowserManager(
@@ -2785,6 +2872,12 @@ class ProxyServerSystem extends EventEmitter {
 <span class="label">强制推理</span>: ${
         this.forceThinking ? "✅ 已启用" : "❌ 已关闭"
       }
+<span class="label">强制联网</span>: ${
+        this.forceWebSearch ? "✅ 已启用" : "❌ 已关闭"
+      }
+<span class="label">强制网址上下文</span>: ${
+        this.forceUrlContext ? "✅ 已启用" : "❌ 已关闭"
+      }
 <span class="label">立即切换 (状态码)</span>: ${
         config.immediateSwitchStatusCodes.length > 0
           ? `[${config.immediateSwitchStatusCodes.join(", ")}]`
@@ -2815,6 +2908,8 @@ class ProxyServerSystem extends EventEmitter {
                 <button onclick="switchSpecificAccount()">切换账号</button>
                 <button onclick="toggleStreamingMode()">切换流模式</button>
                 <button onclick="toggleForceThinking()">切换强制推理</button>
+                <button onclick="toggleForceWebSearch()">切换强制联网</button>
+                <button onclick="toggleForceUrlContext()">切换强制网址上下文</button>
             </div>
         </div>
         <div id="log-section" style="margin-top: 2em;">
@@ -2835,6 +2930,8 @@ class ProxyServerSystem extends EventEmitter {
                     '--- 服务配置 ---\\n' +
                     '<span class="label">流模式</span>: ' + data.status.streamingMode + '\\n' +
                     '<span class="label">强制推理</span>: ' + data.status.forceThinking + '\\n' +
+                    '<span class="label">强制联网</span>: ' + data.status.forceWebSearch + '\\n' +
+                    '<span class="label">强制网址上下文</span>: ' + data.status.forceUrlContext + '\\n' +
                     '<span class="label">立即切换 (状态码)</span>: ' + data.status.immediateSwitchStatusCodes + '\\n' +
                     '<span class="label">API 密钥</span>: ' + data.status.apiKeySource + '\\n' +
                     '--- 账号状态 ---\\n' +
@@ -2902,6 +2999,24 @@ class ProxyServerSystem extends EventEmitter {
             .catch(err => alert('设置失败: ' + err));
         }
 
+        function toggleForceWebSearch() {
+            fetch('/api/toggle-force-web-search', { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(res => res.text()).then(data => { alert(data); updateContent(); })
+            .catch(err => alert('设置失败: ' + err));
+        }
+
+        function toggleForceUrlContext() {
+            fetch('/api/toggle-force-url-context', { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(res => res.text()).then(data => { alert(data); updateContent(); })
+            .catch(err => alert('设置失败: ' + err));
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             updateContent(); 
             setInterval(updateContent, 5000);
@@ -2933,6 +3048,8 @@ class ProxyServerSystem extends EventEmitter {
         status: {
           streamingMode: `${this.streamingMode} (仅启用流式传输时生效)`,
           forceThinking: this.forceThinking ? "✅ 已启用" : "❌ 已关闭",
+          forceWebSearch: this.forceWebSearch ? "✅ 已启用" : "❌ 已关闭",
+          forceUrlContext: this.forceUrlContext ? "✅ 已启用" : "❌ 已关闭",
           browserConnected: !!browserManager.browser,
           immediateSwitchStatusCodes:
             config.immediateSwitchStatusCodes.length > 0
@@ -3017,6 +3134,20 @@ class ProxyServerSystem extends EventEmitter {
       const statusText = this.forceThinking ? "已启用" : "已关闭";
       this.logger.info(`[WebUI] 强制推理开关已切换为: ${statusText}`);
       res.status(200).send(`强制推理模式: ${statusText}`);
+    });
+
+    app.post("/api/toggle-force-web-search", isAuthenticated, (req, res) => {
+      this.forceWebSearch = !this.forceWebSearch;
+      const statusText = this.forceWebSearch ? "已启用" : "已关闭";
+      this.logger.info(`[WebUI] 强制联网搜索开关已切换为: ${statusText}`);
+      res.status(200).send(`强制联网搜索: ${statusText}`);
+    });
+
+    app.post("/api/toggle-force-url-context", isAuthenticated, (req, res) => {
+      this.forceUrlContext = !this.forceUrlContext;
+      const statusText = this.forceUrlContext ? "已启用" : "已关闭";
+      this.logger.info(`[WebUI] 强制网址上下文开关已切换为: ${statusText}`);
+      res.status(200).send(`强制网址上下文: ${statusText}`);
     });
 
     app.use(this._createAuthMiddleware());
