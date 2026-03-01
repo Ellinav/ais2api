@@ -242,6 +242,9 @@ class RequestProcessor {
           if (bodyObj.generationConfig?.thinkingConfig) {
             delete bodyObj.generationConfig.thinkingConfig;
           }
+          if (bodyObj.generationConfig?.responseModalities) {
+            delete bodyObj.generationConfig.responseModalities;
+          }
         }
 
         config.body = JSON.stringify(bodyObj);
