@@ -230,7 +230,7 @@ class BrowserManager {
         );
       }
       this.browser = await firefox.launch({
-        headless: false,
+        headless: true,
         executablePath: this.browserExecutablePath,
         args: this.launchArgs,
       });
@@ -3080,3 +3080,4 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
+
