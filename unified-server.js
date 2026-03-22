@@ -177,6 +177,7 @@ class BrowserManager {
     this.currentAuthIndex = 0;
     this.scriptFileName = "black-browser.js";
     this.noButtonCount = 0;
+    this.isWakeupRunning = false;
     this.launchArgs = [
       "--disable-dev-shm-usage", // 关键！防止 /dev/shm 空间不足导致浏览器崩溃
       "--disable-gpu",
@@ -230,7 +231,7 @@ class BrowserManager {
         );
       }
       this.browser = await firefox.launch({
-        headless: true,
+        headless: false,
         executablePath: this.browserExecutablePath,
         args: this.launchArgs,
       });
@@ -544,7 +545,6 @@ class BrowserManager {
       this.logger.info(`✅ [Browser] 账号 ${authIndex} 的上下文初始化成功！`);
       this.logger.info("✅ [Browser] 浏览器客户端已准备就绪。");
       this.logger.info("==================================================");
-      this._startBackgroundWakeup();
     } catch (error) {
       this.logger.error(
         `❌ [Browser] 账户 ${authIndex} 的上下文初始化失败: ${error.message}`,
@@ -579,11 +579,24 @@ class BrowserManager {
   }
 
   async _startBackgroundWakeup() {
+    if (this.isWakeupRunning) {
+      this.logger.warn(
+        "[Browser] (后台任务) 保活监控已在运行，忽略重复启动请求。",
+      );
+      return;
+    }
+    this.isWakeupRunning = true;
+
     const currentPage = this.page;
     await new Promise((r) => setTimeout(r, 1500));
-    if (!currentPage || currentPage.isClosed() || this.page !== currentPage)
+
+    if (!currentPage || currentPage.isClosed() || this.page !== currentPage) {
+      this.isWakeupRunning = false;
       return;
+    }
+
     this.logger.info("[Browser] (后台任务) 🛡️ 网页保活监控已启动");
+
     while (
       currentPage &&
       !currentPage.isClosed() &&
@@ -787,6 +800,7 @@ class BrowserManager {
         await new Promise((r) => setTimeout(r, 1000));
       }
     }
+    this.isWakeupRunning = false;
   }
 }
 
@@ -3080,4 +3094,3 @@ if (require.main === module) {
 }
 
 module.exports = { ProxyServerSystem, BrowserManager, initializeServer };
-
